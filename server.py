@@ -3,6 +3,8 @@ import threading
 import json
 import random
 import time
+import os
+import base64
 
 LOCK = threading.Lock()
 clients = {}        # player_id -> {"conn": conn, "addr": addr}
@@ -11,6 +13,8 @@ scores = {}         # player_id -> score count
 collectibles = []   # list of {"id":..., "x":..., "y":..., "z":...}
 next_id = 0
 next_collectible_id = 0
+map_data = None     # Map file data (loaded once on server start)
+map_filename = None # Map filename
 
 COLOR_POOL = [
     "red","orange","yellow","green","cyan","blue","violet","pink"
@@ -54,6 +58,63 @@ def broadcast_players():
             if r in players: del players[r]
             if r in scores: del scores[r]
 
+def load_map_file():
+    """Load map file from assets/map directory. Returns (data, filename) or (None, None)"""
+    global map_data, map_filename
+    map_paths = [
+        'assets/map/lesiktest.fbx',
+        'map/lesiktest.fbx',
+        'assets/map/lesiktest.obj',
+        'map/lesiktest.obj'
+    ]
+    
+    for path in map_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, 'rb') as f:
+                    map_data = base64.b64encode(f.read()).decode('utf-8')
+                    map_filename = os.path.basename(path)
+                    print(f"Loaded map file: {path} ({len(map_data)} bytes encoded)")
+                    return map_data, map_filename
+            except Exception as e:
+                print(f"Error loading map {path}: {e}")
+                continue
+    
+    print("WARNING: No map file found. Clients will need map files locally.")
+    return None, None
+
+def send_map_to_client(conn):
+    """Send map file data to client"""
+    global map_data, map_filename
+    if map_data and map_filename:
+        # Send map info (filename and data size)
+        info_msg = json.dumps({
+            "type": "map_info",
+            "filename": map_filename,
+            "size": len(map_data)
+        }).encode()
+        conn.sendall(info_msg)
+        
+        # Wait for client ready signal
+        try:
+            conn.recv(4)  # Client sends "OK"
+        except:
+            pass
+        
+        # Send base64 data in chunks
+        chunk_size = 8192
+        data_bytes = map_data.encode('utf-8')
+        for i in range(0, len(data_bytes), chunk_size):
+            chunk = data_bytes[i:i+chunk_size]
+            conn.sendall(chunk)
+        
+        # Send completion message
+        conn.sendall(json.dumps({"type": "map_complete"}).encode())
+        print(f"Sent map file {map_filename} to client ({len(data_bytes)} bytes)")
+    else:
+        # Send empty map message
+        conn.sendall(json.dumps({"type": "map_info", "filename": None, "size": 0}).encode())
+
 def handle_client(conn, addr):
     global next_id
     try:
@@ -62,6 +123,9 @@ def handle_client(conn, addr):
             next_id += 1
             clients[player_id] = {"conn": conn, "addr": addr}
         conn.sendall(json.dumps({"id": player_id}).encode())
+        
+        # Send map file to client
+        send_map_to_client(conn)
 
         data = conn.recv(4096)
         init = json.loads(data.decode())
@@ -137,6 +201,7 @@ def initialize_collectibles():
 
 def start_server(port=9999):
     global next_collectible_id
+    load_map_file()  # Load map on server start
     initialize_collectibles()
     
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
