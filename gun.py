@@ -1,6 +1,7 @@
 from ursina import *
 from enemy import Enemy
 import crosshair
+import gun_effects
 
 # ------------------------------
 # GLOBALS
@@ -65,16 +66,20 @@ def setup_gun(player_entity, pos=None, rot=None, scale=None):
         collider=None
     )
 
-    # Muzzle flash
+    # Muzzle flash - positioned at the end of the gun barrel
+    # For rifle model, position it forward along the gun's local Z axis
     muzzle_flash = Entity(
         parent=gun,
         model='quad',
         color=color.yellow,
         scale=0.3 * GUN_SCALE,
-        position=(0, 0, 0.6),
+        position=(0, 0, 0.6),  # Forward along gun barrel
         rotation_x=90,
         enabled=False
     )
+    
+    # Initialize gun effects system
+    gun_effects.setup_gun_effects(gun, muzzle_flash, GUN_POS, GUN_ROT, GUN_SCALE)
 
     # Bullet hole texture
     global bullet_hole_tex
@@ -89,59 +94,22 @@ def setup_gun(player_entity, pos=None, rot=None, scale=None):
     crosshair.setup_crosshair()
 
 # ------------------------------
-# TRANSFORM UPDATES
+# TRANSFORM UPDATES (delegated to gun_effects)
 # ------------------------------
 def set_gun_transform(pos=None, rot=None, scale=None):
-    global GUN_POS, GUN_ROT, GUN_SCALE
-    if pos: 
-        GUN_POS = Vec3(pos)
-        if gun: gun.position = GUN_POS
-    if rot: 
-        GUN_ROT = Vec3(rot)
-        if gun: gun.rotation = GUN_ROT
-    if scale: 
-        GUN_SCALE = scale
-        if gun: gun.scale = GUN_SCALE
+    """Update gun transform using gun_effects module."""
+    gun_effects.set_gun_transform(pos, rot, scale)
 
 # ------------------------------
-# RECOIL & MUZZLE
+# RECOIL & MUZZLE (delegated to gun_effects)
 # ------------------------------
 def do_recoil():
-    global recoil_active
-    if not gun or recoil_active:
-        return
-    
-    recoil_active = True
-    
-    # Recoil: move gun back and slightly up (more pronounced)
-    recoil_offset = Vec3(0, 0.05, -0.3 * GUN_SCALE)
-    recoil_pos = GUN_POS + recoil_offset
-    
-    # Immediately move gun back
-    gun.position = recoil_pos
-    
-    # Animate back to original position
-    gun.animate_position(GUN_POS, duration=0.25, curve=curve.in_out_quad)
-    
-    # Reset recoil flag after animation
-    def reset_recoil():
-        global recoil_active
-        recoil_active = False
-    invoke(reset_recoil, delay=0.25)
-    
-    # Also add camera rotation recoil (if player has camera_pivot)
-    if player and hasattr(player, 'camera_pivot'):
-        original_rot_x = player.camera_pivot.rotation_x
-        # Kick camera up more noticeably
-        player.camera_pivot.rotation_x = original_rot_x + 3.0
-        player.camera_pivot.animate('rotation_x', original_rot_x, duration=0.25, curve=curve.in_out_quad)
+    """Apply recoil effect using gun_effects module."""
+    gun_effects.do_recoil(player)
 
 def do_muzzle_flash():
-    if muzzle_flash:
-        muzzle_flash.enabled = True
-        muzzle_flash.animate_scale(0.6 * GUN_SCALE, duration=0.05)
-        muzzle_flash.animate_scale(0.0, duration=0.05, delay=0.05)
-        invoke(setattr, muzzle_flash, 'enabled', False, delay=0.1)
+    """Create muzzle flash effect using gun_effects module."""
+    gun_effects.do_muzzle_flash()
 
 # ------------------------------
 # BULLET HOLE
@@ -192,9 +160,12 @@ def reload():
     
     reloading = True
     if gun:
-        gun.animate_position(GUN_POS + Vec3(0, -0.4 * GUN_SCALE, 0), duration=0.2)
-        gun.animate_position(GUN_POS + Vec3(0, -0.4 * GUN_SCALE, 0), duration=reload_time-0.4, delay=0.2)
+        reload_offset = Vec3(0, -0.4 * GUN_SCALE, 0)
+        gun.animate_position(GUN_POS + reload_offset, duration=0.2)
+        gun.animate_position(GUN_POS + reload_offset, duration=reload_time-0.4, delay=0.2)
         gun.animate_position(GUN_POS, duration=0.2, delay=reload_time-0.2)
+        # Update gun effects position after reload animation
+        invoke(gun_effects.update_gun_position, GUN_POS, delay=reload_time)
     
     invoke(lambda: (globals().update({'ammo': max_ammo, 'reloading': False})), delay=reload_time)
 

@@ -18,6 +18,7 @@ from enemy import Enemy
 import health_bar
 import respawn
 import leaderboard
+import loading
 
 from server_browser import open_server_browser   # ← NEW
 
@@ -194,7 +195,16 @@ def start_game(connection_sock, player_id, username, selected_color):
     Sky()
 
     # Load map (from server if available, otherwise local)
-    forest_map = map_loader.load_map(server_map_path)
+    try:
+        forest_map = map_loader.load_map(server_map_path)
+        if forest_map is None:
+            print("WARNING: Map failed to load, continuing without map...")
+    except Exception as e:
+        print(f"ERROR: Failed to load map: {e}")
+        import traceback
+        traceback.print_exc()
+        print("Continuing without map...")
+        forest_map = None
 
     # Player
     player = FirstPersonController(speed=5, jump_height=2, position=(0,2,0), collider='box')
@@ -223,6 +233,9 @@ def start_game(connection_sock, player_id, username, selected_color):
     
     # Leaderboard
     leaderboard.setup_leaderboard(my_id)
+    
+    # Hide loading screen once everything is loaded
+    loading.hide_loading_screen()
 
 # ----------------------------------------------------
 # SERVER BROWSER CALLBACK
@@ -270,6 +283,10 @@ def send_position():
         pass
 
 def update():
+    # Update loading screen animation if visible
+    if loading.loading_text:
+        loading.update_loading_screen()
+    
     if not game_started or player is None:
         return
     if not pause_menu.paused:
@@ -287,6 +304,7 @@ def update():
     update_remote_players()
     gun.update()
     respawn.update()
+    leaderboard.update_visibility()
     leaderboard.update_leaderboard()
 
 def input(key):
@@ -297,6 +315,7 @@ def input(key):
 # ----------------------------------------------------
 # INIT APP
 # ----------------------------------------------------
+# Windowed mode - can be resized/maximized to fit any screen (projectors, etc.)
 app = Ursina(fullscreen=True)
 
 # Replace menu entirely
