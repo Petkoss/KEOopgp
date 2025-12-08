@@ -59,13 +59,17 @@ def broadcast_players():
             if r in scores: del scores[r]
 
 def load_map_file():
-    """Load map file from assets/map directory. Returns (data, filename) or (None, None)"""
+    """Load map file from assets/map/mestou directory. Returns (data, filename) or (None, None)"""
     global map_data, map_filename
     map_paths = [
-        'assets/map/lesiktest.fbx',
-        'map/lesiktest.fbx',
-        'assets/map/lesiktest.obj',
-        'map/lesiktest.obj'
+        'assets/map/mestou/model/model.fbx',  # mestou first
+        'map/mestou/model/model.fbx',
+        'assets/map/mestou/model.fbx',
+        'map/mestou/model.fbx',
+        'assets/map/mesto/model.fbx',  # Fallback to mesto
+        'map/mesto/model.fbx',
+        'assets/map/mesto/model.g3d',  # Fallback
+        'map/mesto/model.g3d'  # Fallback
     ]
     
     for path in map_paths:

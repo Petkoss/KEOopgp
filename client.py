@@ -192,18 +192,12 @@ def start_game(connection_sock, player_id, username, selected_color):
     # Load map (from server if available, otherwise local)
     forest_map = map_loader.load_map(server_map_path)
 
-    ground = Entity(
-        model='plane',
-        scale=200,
-        texture='grass',
-        texture_scale=(50, 50),
-        position=(0, 0, 0),
-        collider='box'
-    )
-
     # Player
-    player = FirstPersonController(speed=5, jump_height=2, position=(0,2,0))
+    player = FirstPersonController(speed=5, jump_height=2, position=(0,2,0), collider='box')
     player.scale_y = 1.6
+    # Ensure box collider is properly set
+    if player.collider is None:
+        player.collider = 'box'
     mouse.locked = True
     mouse.visible = False
 
@@ -274,11 +268,6 @@ def update():
     if not pause_menu.paused:
         player.speed = 10 if held_keys["left control"] else 5
         send_position()
-        
-        # Check for fall damage
-        if player.y < -10:
-            health_bar.take_damage(10)
-            player.position = Vec3(0, 2, 0)  # Reset position if fell too far
         
         # Update enemies (hitscan shooting)
         for enemy in enemies[:]:
