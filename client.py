@@ -17,6 +17,7 @@ import gun
 from enemy import Enemy
 import health_bar
 import respawn
+import leaderboard
 
 from server_browser import open_server_browser   # ← NEW
 
@@ -52,6 +53,9 @@ def listen_thread():
             msg = json.loads(data.decode())
             if msg.get("type") == "players":
                 server_players = msg.get("players", {})
+                # Update leaderboard data
+                if "leaderboard" in msg:
+                    leaderboard.update_leaderboard_data(msg.get("leaderboard", []))
         except:
             time.sleep(0.05)
 
@@ -216,6 +220,9 @@ def start_game(connection_sock, player_id, username, selected_color):
         enemies.append(enemy)
 
     pause_menu.setup_pause_menu()
+    
+    # Leaderboard
+    leaderboard.setup_leaderboard(my_id)
 
 # ----------------------------------------------------
 # SERVER BROWSER CALLBACK
@@ -280,6 +287,7 @@ def update():
     update_remote_players()
     gun.update()
     respawn.update()
+    leaderboard.update_leaderboard()
 
 def input(key):
     if game_started:
