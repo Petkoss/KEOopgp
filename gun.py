@@ -63,7 +63,10 @@ def setup_gun(player_entity, pos=None, rot=None, scale=None):
         scale=(0.3, 0.2, 1) if not rifle_model else GUN_SCALE,
         position=GUN_POS,
         rotation=GUN_ROT,
-        collider=None
+        collider=None,
+        double_sided=True,
+        render_queue=1,      # draw after world to avoid clipping into walls
+        always_on_top=True,  # keep visible even when close to geometry
     )
 
     # Muzzle flash - positioned at the end of the gun barrel
@@ -75,7 +78,9 @@ def setup_gun(player_entity, pos=None, rot=None, scale=None):
         scale=0.3 * GUN_SCALE,
         position=(0, 0, 0.6),  # Forward along gun barrel
         rotation_x=90,
-        enabled=False
+        enabled=False,
+        render_queue=2,
+        always_on_top=True,
     )
     
     # Initialize gun effects system

@@ -7,7 +7,7 @@ class Enemy(Entity):
         super().__init__(model='cube', color=color.red, collider='box', health=100, **kwargs)
         self.last_shot_time = 0
         self.shoot_interval = random.uniform(1.5, 3.0)  # Random shooting interval
-        self.damage = 10
+        self.damage = 5
     
     def take_damage(self, amount):
         self.health -= amount

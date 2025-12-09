@@ -58,11 +58,16 @@ def broadcast_players():
 def load_map_file():
     """Load map file from assets/map/mesto directory. Returns (data, filename) or (None, None)"""
     global map_data, map_filename
+    # Prefer model.fbx first, then Untitled.glb
     map_paths = [
-        'assets/map/mesto/Untitled.glb',  # Untitled.glb (textures embedded)
-        'assets/map/mesto/model.fbx',  # Fallback: model.fbx
-        'map/mesto/Untitled.glb',  # Fallback
-        'map/mesto/model.fbx',  # Fallback
+        'assets/map/mesto/model.fbx',
+        'assets/map/mesto/model.FBX',
+        'assets/map/mesto/Untitled.glb',
+        'assets/map/mesto/Untitled.GLB',
+        'map/mesto/model.fbx',
+        'map/mesto/model.FBX',
+        'map/mesto/Untitled.glb',
+        'map/mesto/Untitled.GLB',
     ]
     
     for path in map_paths:

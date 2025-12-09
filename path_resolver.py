@@ -34,51 +34,74 @@ def get_texture_directory(model_path: Path = None):
 
 def resolve_map_model_path(preferred: Path = None) -> Path | None:
     """
-    Choose the first existing map model path from common locations.
-    
-    Priority order:
-    1. Preferred path (if provided)
-    2. assets/map/mesto/Untitled.glb (GLB with embedded textures)
-    3. assets/map/mesto/model.fbx (FBX file)
-    4. Fallback locations
+    Pick the first existing map model file.
+
+    The old version only looked for two hard‑coded files. This version:
+    - Accepts an explicit file path (with or without extension)
+    - Searches common asset roots and all map files in those folders
+    - Prefers GLB/GLTF (embedded textures) before FBX
     """
-    def _paths_for_base(base: Path):
-        """Generate paths with different extensions for a base path."""
-        exts = (".fbx", ".FBX", ".gltf", ".glb")
-        return [base.with_suffix(ext) for ext in exts]
+    # Prefer FBX first (per request), then GLB/GLTF.
+    ext_priority = (".fbx", ".FBX", ".glb", ".gltf")
+
+    def _maybe_add(path: Path, bag: list[Path], seen: set[Path]):
+        if path in seen:
+            return
+        seen.add(path)
+        bag.append(path)
+
+    def _variants(base: Path) -> list[Path]:
+        """Generate candidate paths for a base path (with or without suffix)."""
+        if base.suffix:  # If caller already provided an extension, try it first
+            ordered_exts = (base.suffix,) + tuple(e for e in ext_priority if e != base.suffix)
+        else:
+            ordered_exts = ext_priority
+        return [base.with_suffix(ext) for ext in ordered_exts]
 
     candidates: list[Path] = []
-    
-    # First priority: preferred path (usually from server)
+    seen: set[Path] = set()
+
+    # 1) Caller-provided path (often from server)
     if preferred:
-        candidates.extend(_paths_for_base(preferred.expanduser()))
+        for p in _variants(preferred.expanduser()):
+            _maybe_add(p, candidates, seen)
 
     asset_root = get_asset_root()
-    
-    # Second priority: standard locations in assets folder
-    bases = [
-        asset_root / "map" / "mesto" / "Untitled",  # Untitled.glb (textures embedded)
-        asset_root / "map" / "mesto" / "model",  # model.fbx
-    ]
-    
-    # Third priority: fallback locations
-    fallback_bases = [
-        Path.cwd() / "assets" / "map" / "mesto" / "Untitled",
-        Path.cwd() / "assets" / "map" / "mesto" / "model",
-        Path(__file__).resolve().parent / "assets" / "map" / "mesto" / "Untitled",
-        Path(__file__).resolve().parent / "assets" / "map" / "mesto" / "model",
-    ]
-    
-    # Add all candidate paths
-    for base in bases + fallback_bases:
-        candidates.extend(_paths_for_base(base))
 
-    # Find first existing path
+    # 2) Known filenames we ship with (model first, then Untitled)
+    hardcoded_bases = [
+        asset_root / "map" / "mesto" / "model",
+        asset_root / "map" / "mesto" / "Untitled",
+        Path.cwd() / "assets" / "map" / "mesto" / "model",
+        Path.cwd() / "assets" / "map" / "mesto" / "Untitled",
+        Path(__file__).resolve().parent / "assets" / "map" / "mesto" / "model",
+        Path(__file__).resolve().parent / "assets" / "map" / "mesto" / "Untitled",
+    ]
+    for base in hardcoded_bases:
+        for p in _variants(base):
+            _maybe_add(p, candidates, seen)
+
+    # 3) Any map file in common map directories (useful for newly added maps like lesiktest.fbx)
+    search_roots = [
+        asset_root / "map",
+        asset_root / "map" / "mesto",
+        Path.cwd() / "assets" / "map",
+        Path.cwd() / "assets" / "map" / "mesto",
+        Path(__file__).resolve().parent / "assets" / "map",
+        Path(__file__).resolve().parent / "assets" / "map" / "mesto",
+    ]
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for ext in ext_priority:
+            for p in root.glob(f"*{ext}"):
+                _maybe_add(p, candidates, seen)
+
+    # 4) Return the first existing file following the priority order above
     for path in candidates:
         if path.exists():
             return path
 
-    # If nothing found, print debug info
     print("Map file not found. Paths tried:")
     for path in candidates:
         print(f"  - {path}")

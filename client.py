@@ -19,6 +19,7 @@ import health_bar
 import respawn
 import leaderboard
 import loading
+import player as player_mod
 
 from server_browser import open_server_browser   # ← NEW
 
@@ -189,64 +190,74 @@ def start_game(connection_sock, player_id, username, selected_color):
 
     threading.Thread(target=listen_thread, daemon=True).start()
 
-    # Lighting & sky
-    DirectionalLight(y=10, rotation=(45,-45,0))
-    AmbientLight(color=color.rgba(100,100,100,0.5))
-    Sky()
-
-    # Load map (from server if available, otherwise local)
     try:
-        forest_map = map_loader.load_map(server_map_path)
-        if forest_map is None:
-            print("WARNING: Map failed to load, continuing without map...")
-    except Exception as e:
-        print(f"ERROR: Failed to load map: {e}")
-        import traceback
-        traceback.print_exc()
-        print("Continuing without map...")
-        forest_map = None
+        # Lighting & sky
+        DirectionalLight(y=10, rotation=(45,-45,0))
+        AmbientLight(color=color.rgba(100,100,100,0.5))
+        Sky()
 
-    # Player
-    player = FirstPersonController(speed=5, jump_height=2, position=(0,2,0), collider='box')
-    player.scale_y = 1.6
-    # Ensure box collider is properly set
-    if player.collider is None:
-        player.collider = 'box'
-    mouse.locked = True
-    mouse.visible = False
+        # Load map (from server if available, otherwise local)
+        try:
+            forest_map = map_loader.load_map(server_map_path)
+            if forest_map is None:
+                print("WARNING: Map failed to load, continuing without map...")
+        except Exception as e:
+            print(f"ERROR: Failed to load map: {e}")
+            import traceback
+            traceback.print_exc()
+            print("Continuing without map...")
+            forest_map = None
 
-    # Health bar
-    health_bar.setup_health_bar(player)
+        # Player (local model hidden for first-person)
+        player = player_mod.setup_local_player(position=Vec3(0,2,0), normal_speed=5, sprint_speed=10, jump_height=2)
 
-    # Gun
-    gun.setup_gun(player)
-    
-    # Spawn 5 enemies next to each other
-    global enemies
-    enemies = []
-    base_pos = Vec3(3, 0, 10)
-    for i in range(5):
-        enemy = Enemy(position=base_pos + Vec3(i * 2, 0, 0), scale=(1, 2, 1))
-        enemies.append(enemy)
+        # Health bar
+        health_bar.setup_health_bar(player)
 
-    pause_menu.setup_pause_menu()
-    
-    # Leaderboard
-    leaderboard.setup_leaderboard(my_id)
-    
-    # Hide loading screen once everything is loaded
-    loading.hide_loading_screen()
+        # Gun
+        gun.setup_gun(player)
+        
+        # Spawn 5 enemies next to each other
+        global enemies
+        enemies = []
+        base_pos = Vec3(3, 0, 10)
+        for i in range(5):
+            enemy = Enemy(position=base_pos + Vec3(i * 2, 0, 0), scale=(1, 2, 1))
+            enemies.append(enemy)
+
+        # Static showcase playermodel near enemies
+        player_mod.spawn_static_playermodel(position=base_pos + Vec3(-2, 0, -2), scale=1.2)
+
+        pause_menu.setup_pause_menu()
+        
+        # Leaderboard
+        leaderboard.setup_leaderboard(my_id)
+    finally:
+        # Always hide loading, even if something failed after connection
+        loading.hide_loading_screen()
 
 # ----------------------------------------------------
 # SERVER BROWSER CALLBACK
 # ----------------------------------------------------
 def on_server_selected(ip):
     """Called when player clicks a server."""
-    s, pid, username, color = connect_to_server(ip)
-    if s:
-        start_game(s, pid, username, color)
-    else:
-        print("Connection failed.")
+    # Show loading UI and connect in background so the UI thread doesn't hang.
+    loading.show_loading_screen("Connecting to server")
+
+    def _connect():
+        s, pid, username, color = connect_to_server(ip)
+        if s:
+            # Run start_game on the main thread
+            from ursina import invoke
+            invoke(lambda: start_game(s, pid, username, color))
+        else:
+            print("Connection failed.")
+            # Restore UI: hide loading and reopen browser so user isn't stuck on gray screen
+            from ursina import invoke
+            invoke(loading.hide_loading_screen)
+            invoke(lambda: open_server_browser(on_server_selected))
+
+    threading.Thread(target=_connect, daemon=True).start()
 
 # ----------------------------------------------------
 # UPDATE LOOP
@@ -290,8 +301,8 @@ def update():
     if not game_started or player is None:
         return
     if not pause_menu.paused:
-        player.speed = 10 if held_keys["left control"] else 5
         send_position()
+        player_mod.update_local_player(player)
         
         # Update enemies (hitscan shooting)
         for enemy in enemies[:]:

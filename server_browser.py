@@ -92,7 +92,9 @@ class ServerBrowser(Entity):
     # Scan LAN servers
     def _scan(self):
         servers = scan_lan()
-        self._display_servers(servers)
+        # Ensure UI updates occur on main thread to avoid Panda3D NodePath asserts
+        from ursina import invoke
+        invoke(lambda: self._display_servers(servers))
 
     # Display server buttons
     def _display_servers(self, servers):

@@ -31,8 +31,31 @@ def load_all_textures(texture_dir: Path = None):
 
 # Alias for backward compatibility
 def load_all_rgb_textures(texture_dir: Path = None):
-    """Alias for load_all_textures() for backward compatibility."""
-    return load_all_textures(texture_dir)
+    """
+    Load RGB_* prefixed textures (color maps). If none, load all.
+    """
+    if texture_dir is None:
+        texture_dir = path_resolver.get_texture_directory()
+    
+    textures = {}
+    if not texture_dir.exists():
+        print(f"Texture directory not found: {texture_dir}")
+        return textures
+    
+    texture_paths = path_resolver.get_texture_paths(texture_dir)
+    rgb_paths = [p for p in texture_paths if p.stem.startswith("RGB_")]
+    paths_to_load = rgb_paths if rgb_paths else texture_paths
+    
+    for tex_file in paths_to_load:
+        try:
+            tex_name = tex_file.stem
+            textures[tex_name] = load_texture(str(tex_file))
+            print(f"Loaded texture: {tex_name} ({tex_file.suffix})")
+        except Exception as e:
+            print(f"Failed to load texture {tex_file}: {e}")
+    
+    print(f"Total textures loaded: {len(textures)}")
+    return textures
 
 
 def apply_textures_to_entity(entity, textures: dict, texture_dir: Path, texture_index=[0], used_textures=set()):

@@ -9,8 +9,8 @@ def setup_pause_menu():
     global pause_panel, pause_label, pause_hint, continue_button, exit_button
     pause_panel = Entity(parent=camera.ui, model='quad', color=color.rgba(0,0,0,180),
                          scale=(0.7,0.4), enabled=False, position=(0, 0))
-    pause_label = Text("Game Paused", parent=pause_panel, y=0.15, scale=2, origin=(0,0))
-    pause_hint = Text("Press ESC to resume", parent=pause_panel, y=0.05, scale=1,
+    pause_label = Text("Game Paused", parent=pause_panel, y=0.25, scale=2, origin=(0,0))
+    pause_hint = Text("Press ESC to resume", parent=pause_panel, y=0.075, scale=1.5,
                       origin=(0,0), color=color.azure)
     continue_button = Button(text="Continue", parent=pause_panel, y=-0.05, scale=(0.4,0.12),
                             origin=(0, 0))

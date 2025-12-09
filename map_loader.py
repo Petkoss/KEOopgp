@@ -3,6 +3,7 @@ from ursina import *
 import time
 import texture_loader
 import path_resolver
+from path_resolver import resolve_map_model_path
 
 
 def load_map(map_file_path=None):
@@ -21,7 +22,7 @@ def load_map(map_file_path=None):
     floor = Entity(
         model="cube",
         scale=(500, 1, 500),
-        position=(0, -5, 0),
+        position=(0, -1, 0),
         collider="box",
         visible=True,
     )
@@ -69,45 +70,24 @@ def load_map(map_file_path=None):
         # Check if this is a GLB file (which has embedded textures)
         is_glb = model_path.suffix.lower() in ['.glb', '.gltf']
         
-        # For GLB files, try without collider first (mesh colliders can be problematic with complex GLB geometry)
+        # Create map entity without heavy mesh colliders to improve performance
         if is_glb:
-            try:
-                forest_map = Entity(
-                    model=model,
-                    scale=1,
-                    position=(0, 1, 0),
-                    double_sided=True,
-                    collider="mesh",
-                )
-                print("Forest map entity created successfully (GLB, with mesh collider)")
-            except Exception as e:
-                print(f"Error creating forest_map entity: {e}")
-                raise
+            forest_map = Entity(
+                model=model,
+                scale=0.05,
+                position=(0, 1, 0),
+                double_sided=True,
+            )
+            print("Forest map entity created successfully (GLB, no collider for perf)")
         else:
-            # For FBX files, try with mesh collider
-            try:
-                forest_map = Entity(
-                    model=model,
-                    scale=0.5,
-                    position=(0, -1.5, 0),
-                    double_sided=True,
-                    collider="mesh",
-                )
-                print("Forest map entity created successfully (FBX, with mesh collider)")
-            except Exception as e:
-                print(f"Error creating forest_map entity with collider: {e}")
-                # Try without collider if mesh collider fails
-                try:
-                    forest_map = Entity(
-                        model=model,
-                        scale=0.5,
-                        position=(0, -1.5, 0),
-                        double_sided=True,
-                    )
-                    print("Forest map entity created without collider")
-                except Exception as e2:
-                    print(f"Error creating forest_map entity without collider: {e2}")
-                    raise
+            forest_map = Entity(
+                model=model,
+                scale=0.035,
+                position=(0, -1, 0),
+                double_sided=True,
+                collider="mesh",
+            )
+            print("Forest map entity created successfully (FBX, no collider for perf)")
         
         # Debug: Check model structure
         if hasattr(forest_map, 'children'):
@@ -122,7 +102,8 @@ def load_map(map_file_path=None):
             # For FBX files, load and apply external textures
             texture_dir = path_resolver.get_texture_directory(model_path)
             print(f"Loading textures from: {texture_dir}")
-            textures = texture_loader.load_all_rgb_textures(texture_dir)
+            # Load all textures (color + others) so we can vary wall materials
+            textures = texture_loader.load_all_textures(texture_dir)
             
             if textures:
                 print(f"Found {len(textures)} textures, applying to model...")
@@ -144,33 +125,27 @@ def load_map(map_file_path=None):
                             except Exception as e:
                                 print(f"Could not apply texture to material {i}: {e}")
                 
-                # Also try to apply textures to child entities
-                texture_index = [0]  # Use list to allow modification in recursive calls
+                texture_index = [0]
                 used_textures = set()
                 applied = texture_loader.apply_textures_to_entity(forest_map, textures, texture_dir, texture_index, used_textures)
-                
-                # If model has sub-meshes or parts, try to access them
-                if hasattr(forest_map.model, 'getNumGeoms'):
-                    try:
-                        num_geoms = forest_map.model.getNumGeoms()
-                        print(f"Model has {num_geoms} geometries")
-                        for i in range(num_geoms):
-                            if i < len(rgb_textures_list):
-                                tex_name, texture = rgb_textures_list[i % len(rgb_textures_list)]
-                                # Try to create child entity for each geometry
+
+                # Also set textures directly on geom nodes for more variety
+                try:
+                    geom_nodes = forest_map.model.findAllMatches('**/+GeomNode')
+                    print(f"Geom nodes found: {len(geom_nodes)}")
+                    if geom_nodes:
+                        tex_list = rgb_textures_list if rgb_textures_list else list(textures.items())
+                        if tex_list:
+                            for i, node in enumerate(geom_nodes[:50]):  # cap for perf
+                                tex_name, tex_val = tex_list[i % len(tex_list)]
                                 try:
-                                    child_entity = Entity(
-                                        parent=forest_map,
-                                        model=forest_map.model,
-                                        texture=texture,
-                                        double_sided=True
-                                    )
-                                    print(f"Created child entity with texture {tex_name}")
+                                    node.setTexture(tex_val, 1)
+                                    print(f"Applied {tex_name} to geom {i}")
                                 except Exception as e:
-                                    print(f"Could not create child entity: {e}")
-                    except Exception as e:
-                        print(f"Could not access model geometries: {e}")
-                
+                                    print(f"Could not apply texture to geom {i}: {e}")
+                except Exception as e:
+                    print(f"Geom texture application failed: {e}")
+
                 print(f"Applied textures to {applied} entity/entities")
             else:
                 print("WARNING: No RGB textures found in texture directory")
