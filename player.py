@@ -22,12 +22,11 @@ def create_player(position=Vec3(0, 2, 0), speed=5, jump_height=2):
         controller.collider = "box"
 
     # Attach Steve model but keep it hidden for the local player (first-person)
-    steve_model = "assets/minecraft-steve-rigged/Steve.glb"
-    steve_tex = load_texture("assets/minecraft-steve-rigged/diffuse_0.jpeg")
+    steve_model = "assets/Steve.glb"
+    steve_tex = load_texture("assets/diffuse")
     controller.playermodel = Entity(
         parent=controller,
         model=steve_model,
-        texture=steve_tex,
         scale=1.0,
         y=-0.4,
         double_sided=True,
@@ -100,11 +99,10 @@ def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0):
     """
     Spawn a non-moving Steve model in the world (for showcase/testing).
     """
-    steve_model = "assets/minecraft-steve-rigged/Steve.glb"
-    steve_tex = load_texture("assets/minecraft-steve-rigged/diffuse_0.jpeg")
+    steve_model = "assets/Steve.glb"
+    steve_tex = load_texture("diffuse")
     return Entity(
         model=steve_model,
-        texture=steve_tex,
         position=position,
         scale=scale,
         collider="box",
