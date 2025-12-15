@@ -1,5 +1,6 @@
 from ursina import *
 from enemy import Enemy
+import player as player_mod
 import crosshair
 import gun_effects
 
@@ -148,8 +149,12 @@ def shoot():
     hit_info = raycast(camera.world_position, camera.forward, distance=50, ignore=ignore)
     
     if hit_info.hit:
-        if isinstance(hit_info.entity, Enemy):
-            hit_info.entity.take_damage(20)
+        target = hit_info.entity
+        if isinstance(target, Enemy):
+            target.take_damage(20)
+        elif player_mod.apply_player_damage(target, 20):
+            # Damage applied to another player target
+            pass
         else:
             create_bullet_hole(hit_info)
 
@@ -182,8 +187,14 @@ def hover_damage():
         return
     ignore = [player, gun] if gun else [player]
     hit_info = raycast(camera.world_position, camera.forward, distance=50, ignore=ignore)
-    if hit_info.hit and isinstance(hit_info.entity, Enemy):
-        hit_info.entity.take_damage(20)
+    if not hit_info.hit:
+        return
+
+    target = hit_info.entity
+    if isinstance(target, Enemy):
+        target.take_damage(20)
+    else:
+        player_mod.apply_player_damage(target, 10)
 
 # ------------------------------
 # INPUT HANDLING

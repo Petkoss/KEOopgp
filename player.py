@@ -5,6 +5,42 @@ import math
 
 DEFAULT_HEIGHT = 2.4
 DEFAULT_Y_OFFSET = 1.2
+DEFAULT_HEALTH = 100
+
+
+def _attach_health(entity, max_health=DEFAULT_HEALTH, on_death=None):
+    """
+    Make an entity damageable by giving it health-related attributes.
+    """
+    entity.max_health = max_health
+    entity.health = max_health
+    entity.is_player_target = True  # flag so gun logic can distinguish players
+    entity._on_player_death = on_death
+
+
+def apply_player_damage(target, amount):
+    """
+    Apply damage to any entity that was marked as a player target.
+    Returns True if damage was applied.
+    """
+    if not getattr(target, "is_player_target", False):
+        return False
+
+    # Ensure the target has basic health fields
+    if not hasattr(target, "health"):
+        _attach_health(target)
+
+    if getattr(target, "health", 0) <= 0:
+        return True  # already dead
+
+    target.health = max(0, target.health - amount)
+    if target.health <= 0:
+        death_cb = getattr(target, "_on_player_death", None)
+        if callable(death_cb):
+            death_cb()
+        else:
+            destroy(target)
+    return True
 
 
 def create_player(position=Vec3(0, 2, 0), speed=5, jump_height=2):
@@ -20,6 +56,9 @@ def create_player(position=Vec3(0, 2, 0), speed=5, jump_height=2):
     controller.scale_y = DEFAULT_HEIGHT
     if controller.collider is None:
         controller.collider = "box"
+
+    # Give the controller baseline health so it can receive player-vs-player damage
+    _attach_health(controller)
 
     # Attach Steve model but keep it hidden for the local player (first-person)
     steve_model = "assets/Steve.glb"
@@ -101,11 +140,13 @@ def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0):
     """
     steve_model = "assets/Steve.glb"
     steve_tex = load_texture("diffuse")
-    return Entity(
+    ent = Entity(
         model=steve_model,
         position=position,
         scale=scale,
         collider="box",
         double_sided=True,
     )
+    _attach_health(ent)
+    return ent
 
