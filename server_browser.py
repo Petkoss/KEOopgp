@@ -105,16 +105,6 @@ class ServerBrowser(Entity):
             y=-0.15,
             character_limit=32
         )
-        self._ui_elems.append(self.ip_field)
-        self.connect_btn = Button(
-            parent=camera.ui,
-            text="Connect IP",
-            scale=(0.75, 0.12),
-            y=-0.25,
-            color=color.lime
-        )
-        self.connect_btn.on_click = self._manual_connect
-        self._ui_elems.append(self.connect_btn)
 
         threading.Thread(target=self._scan, daemon=True).start()
 
