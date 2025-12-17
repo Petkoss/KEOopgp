@@ -4,14 +4,13 @@ import json
 import random
 import time
 import os
-import base64
 
 LOCK = threading.Lock()
 clients = {}        # player_id -> {"conn": conn, "addr": addr}
 players = {}        # player_id -> {"x":..., "y":..., "z":..., "name":..., "color":..., "score":...}
 scores = {}         # player_id -> score count
 next_id = 0
-map_data = None     # Map file data (loaded once on server start)
+map_data = None     # Raw map bytes (loaded once on server start)
 map_filename = None # Map filename
 
 COLOR_POOL = [
@@ -56,65 +55,64 @@ def broadcast_players():
             if r in scores: del scores[r]
 
 def load_map_file():
-    """Load map file from assets/map/mesto directory. Returns (data, filename) or (None, None)"""
+    """Load the bundled GLB map as raw bytes. Returns (data, filename) or (None, None)."""
     global map_data, map_filename
-    # Prefer model.fbx first, then Untitled.glb
     map_paths = [
-        'assets/map/mesto/model.fbx',
-        'assets/map/mesto/model.FBX',
-        'assets/map/mesto/Untitled.glb',
-        'assets/map/mesto/Untitled.GLB',
-        'map/mesto/model.fbx',
-        'map/mesto/model.FBX',
-        'map/mesto/Untitled.glb',
-        'map/mesto/Untitled.GLB',
+        "assets/map/akozeke.glb",
+        "map/akozeke.glb",
     ]
-    
+
     for path in map_paths:
         if os.path.exists(path):
             try:
-                with open(path, 'rb') as f:
-                    map_data = base64.b64encode(f.read()).decode('utf-8')
+                with open(path, "rb") as f:
+                    map_data = f.read()  # raw bytes
                     map_filename = os.path.basename(path)
-                    print(f"Loaded map file: {path} ({len(map_data)} bytes encoded)")
+                    print(f"Loaded map file: {path} ({len(map_data)} bytes)")
                     return map_data, map_filename
             except Exception as e:
                 print(f"Error loading map {path}: {e}")
                 continue
-    
+
     print("WARNING: No map file found. Clients will need map files locally.")
     return None, None
 
 def send_map_to_client(conn):
-    """Send map file data to client"""
+    """Send map file data to client using raw binary."""
     global map_data, map_filename
     if map_data and map_filename:
-        # Send map info (filename and data size)
-        info_msg = json.dumps({
-            "type": "map_info",
-            "filename": map_filename,
-            "size": len(map_data)
-        }).encode()
+        # Send map info (filename and raw byte size)
+        info_msg = json.dumps(
+            {
+                "type": "map_info",
+                "filename": map_filename,
+                "size": len(map_data),
+            }
+        ).encode()
         conn.sendall(info_msg)
-        
-        # Wait for client ready signal
+
+        # Wait for client signal: "OK" to download, "SKIP" to reuse cached copy
         try:
-            conn.recv(4)  # Client sends "OK"
-        except:
-            pass
-        
-        # Send base64 data in chunks
+            signal = conn.recv(4)
+        except Exception:
+            signal = b""
+
+        if signal.startswith(b"SKIP"):
+            print("Client requested to skip map download (using cached copy).")
+            return
+
+        # Default behaviour: send raw bytes
         chunk_size = 8192
-        data_bytes = map_data.encode('utf-8')
-        for i in range(0, len(data_bytes), chunk_size):
-            chunk = data_bytes[i:i+chunk_size]
-            conn.sendall(chunk)
-        
-        # Send completion message
-        conn.sendall(json.dumps({"type": "map_complete"}).encode())
-        print(f"Sent map file {map_filename} to client ({len(data_bytes)} bytes)")
+        total = len(map_data)
+        sent = 0
+        while sent < total:
+            end = min(sent + chunk_size, total)
+            conn.sendall(map_data[sent:end])
+            sent = end
+
+        print(f"Sent map file {map_filename} to client ({total} bytes)")
     else:
-        # Send empty map message
+        # Send empty map message (no map on server)
         conn.sendall(json.dumps({"type": "map_info", "filename": None, "size": 0}).encode())
 
 def handle_client(conn, addr):

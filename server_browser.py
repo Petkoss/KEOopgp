@@ -105,6 +105,7 @@ class ServerBrowser(Entity):
             y=-0.15,
             character_limit=32
         )
+        self._ui_elems.append(self.ip_field)
 
         threading.Thread(target=self._scan, daemon=True).start()
 

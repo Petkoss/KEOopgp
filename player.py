@@ -43,7 +43,7 @@ def apply_player_damage(target, amount):
     return True
 
 
-def create_player(position=Vec3(0, 2, 0), speed=5, jump_height=2):
+def create_player(position=Vec3(0, 3, -2), speed=5, jump_height=2):
     """
     Create and configure the local player controller with a simple visible model.
     """
@@ -79,7 +79,7 @@ def create_player(position=Vec3(0, 2, 0), speed=5, jump_height=2):
     return controller
 
 
-def setup_local_player(position=Vec3(0, 2, 0), normal_speed=5, sprint_speed=10, jump_height=2):
+def setup_local_player(position=Vec3(0, 2, -2), normal_speed=5, sprint_speed=10, jump_height=2):
     """
     Factory that creates the player and handles mouse locking defaults.
     """
