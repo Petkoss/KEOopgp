@@ -158,19 +158,6 @@ class ServerBrowser(Entity):
         self.refresh_btn.on_click = self.refresh
         self._ui_elems.append(self.refresh_btn)
 
-<<<<<<< HEAD
-=======
-        # Manual IP input
-        self.ip_field = InputField(
-            parent=camera.ui,
-            default_value="",
-            scale=(0.9, 0.12),
-            y=-0.15,
-            character_limit=32
-        )
-        self._ui_elems.append(self.ip_field)
-
->>>>>>> 191e1d5a16b667516ee5923e8c1a681d99e99f4a
         threading.Thread(target=self._scan, daemon=True).start()
 
     # Scan LAN servers

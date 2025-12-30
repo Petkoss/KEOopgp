@@ -260,16 +260,14 @@ def on_server_selected(ip, username=None):
     print(f"Connecting to server {ip}...")
 
     def _connect():
-<<<<<<< HEAD
-        s, pid, username, color = connect_to_server(ip, username)
-        if s:
-            # Run start_game on the main thread
-=======
         try:
-            s, pid, username, color = connect_to_server(ip)
+            # Use the username parameter from outer scope
+            player_username = username
+            s, pid, player_username, color = connect_to_server(ip, player_username)
             if s:
+                # Run start_game on the main thread
                 from ursina import invoke
-                invoke(lambda: start_game(s, pid, username, color))
+                invoke(lambda: start_game(s, pid, player_username, color))
             else:
                 print("Connection failed.")
                 from ursina import invoke
@@ -278,7 +276,6 @@ def on_server_selected(ip, username=None):
             print(f"Unexpected error in _connect: {e}")
             import traceback
             traceback.print_exc()
->>>>>>> 191e1d5a16b667516ee5923e8c1a681d99e99f4a
             from ursina import invoke
             invoke(lambda: open_server_browser(on_server_selected))
 
