@@ -150,9 +150,12 @@ def receive_map_from_server(sock):
 # ----------------------------------------------------
 # CONNECT TO SERVER (used by server browser)
 # ----------------------------------------------------
-def connect_to_server(ip):
+def connect_to_server(ip, username=None):
     global USERNAME, server_map_path
-    USERNAME = f"Player{random.randint(1000,9999)}"
+    if username and username.strip():
+        USERNAME = username.strip()
+    else:
+        USERNAME = f"Player{random.randint(1000,9999)}"
     picked_color = random.choice(list(COLOR_MAP.keys()))
 
     try:
@@ -239,13 +242,13 @@ def start_game(connection_sock, player_id, username, selected_color):
 # ----------------------------------------------------
 # SERVER BROWSER CALLBACK
 # ----------------------------------------------------
-def on_server_selected(ip):
+def on_server_selected(ip, username=None):
     """Called when player clicks a server."""
     # Show loading UI and connect in background so the UI thread doesn't hang.
     loading.show_loading_screen("Connecting to server")
 
     def _connect():
-        s, pid, username, color = connect_to_server(ip)
+        s, pid, username, color = connect_to_server(ip, username)
         if s:
             # Run start_game on the main thread
             from ursina import invoke
