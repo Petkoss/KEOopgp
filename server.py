@@ -7,11 +7,17 @@ import os
 
 LOCK = threading.Lock()
 clients = {}        # player_id -> {"conn": conn, "addr": addr}
-players = {}        # player_id -> {"x":..., "y":..., "z":..., "name":..., "color":..., "score":...}
+players = {}        # player_id -> {"x":..., "y":..., "z":..., "name":..., "color":..., "score":..., "health":...}
 scores = {}         # player_id -> score count
+health = {}         # player_id -> current health value
+MAX_HEALTH = 100
 next_id = 0
 map_data = None     # Raw map bytes (loaded once on server start)
 map_filename = None # Map filename
+
+# Broadcast throttling
+last_broadcast_time = {}
+broadcast_interval = 0.1  # Broadcast every 100ms (10 times per second instead of 60+)
 
 COLOR_POOL = [
     "red","orange","yellow","green","cyan","blue","violet","pink"
@@ -30,15 +36,17 @@ def get_local_ip():
 
 def broadcast_players():
     with LOCK:
-        # Include scores in player data
-        players_with_scores = {}
+        # Include scores and health in player data
+        players_with_data = {}
         for pid, pdata in players.items():
-            players_with_scores[pid] = pdata.copy()
-            players_with_scores[pid]["score"] = scores.get(pid, 0)
+            players_with_data[pid] = pdata.copy()
+            players_with_data[pid]["score"] = scores.get(pid, 0)
+            players_with_data[pid]["health"] = health.get(pid, MAX_HEALTH)
+            players_with_data[pid]["max_health"] = MAX_HEALTH
         
         data = json.dumps({
             "type": "players",
-            "players": players_with_scores,
+            "players": players_with_data,
             "leaderboard": sorted([(pid, players[pid]["name"], scores.get(pid, 0)) for pid in players.keys()], 
                                  key=lambda x: x[2], reverse=True)
         }).encode()
@@ -53,13 +61,14 @@ def broadcast_players():
             if r in clients: del clients[r]
             if r in players: del players[r]
             if r in scores: del scores[r]
+            if r in health: del health[r]
 
 def load_map_file():
     """Load the bundled GLB map as raw bytes. Returns (data, filename) or (None, None)."""
     global map_data, map_filename
     map_paths = [
-        "assets/map/akozeke.glb",
-        "map/akozeke.glb",
+        "assets/map/maleakozeke.glb",
+        "map/maleakozeke.glb",
     ]
 
     for path in map_paths:
@@ -140,6 +149,7 @@ def handle_client(conn, addr):
                 color = COLOR_POOL[int(player_id) % len(COLOR_POOL)]
             players[player_id] = {"x":0,"y":0,"z":0,"name":name,"color":color}
             scores[player_id] = 0
+            health[player_id] = MAX_HEALTH  # Initialize health
 
         broadcast_players()
 
@@ -149,6 +159,7 @@ def handle_client(conn, addr):
                 break
             d = json.loads(data.decode())
             
+            should_broadcast = False
             with LOCK:
                 if d.get("type") == "position":
                     # Handle position update
@@ -158,7 +169,36 @@ def handle_client(conn, addr):
                             "y": float(d.get("y", players[player_id]["y"])),
                             "z": float(d.get("z", players[player_id]["z"]))
                         })
-            broadcast_players()
+                    # Throttle position broadcasts - only broadcast if enough time has passed
+                    current_time = time.time()
+                    if current_time - last_broadcast_time.get("position", 0) >= broadcast_interval:
+                        last_broadcast_time["position"] = current_time
+                        should_broadcast = True
+                elif d.get("type") == "damage":
+                    # Handle damage event
+                    target_id = d.get("target_id")
+                    damage_amount = float(d.get("amount", 0))
+                    attacker_id = player_id
+                    
+                    # Validate: can't damage yourself, target must exist, attacker must exist
+                    if (target_id and target_id != attacker_id and 
+                        target_id in players and target_id in health and
+                        attacker_id in players):
+                        # Apply damage
+                        health[target_id] = max(0, health[target_id] - damage_amount)
+                        
+                        # Award score to attacker if target dies
+                        if health[target_id] <= 0 and target_id in health:
+                            scores[attacker_id] = scores.get(attacker_id, 0) + 1
+                            # Reset target health after death (respawn)
+                            health[target_id] = MAX_HEALTH
+                        
+                        # Damage events should broadcast immediately
+                        should_broadcast = True
+            
+            # Broadcast if needed
+            if should_broadcast:
+                broadcast_players()
 
     except: pass
     finally:
@@ -169,6 +209,7 @@ def handle_client(conn, addr):
                 del clients[player_id]
             if player_id in players: del players[player_id]
             if player_id in scores: del scores[player_id]
+            if player_id in health: del health[player_id]
         broadcast_players()
 
 def start_server(port=9999):

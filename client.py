@@ -19,7 +19,7 @@ import respawn
 import leaderboard
 import player as player_mod
 
-from server_browser import open_server_browser
+from server_browser import open_server_browser, get_current_browser
 
 # --- GLOBALS ---
 sock = None
@@ -29,6 +29,8 @@ game_started = False
 server_map_path = None  # Path to map file received from server
 
 server_players = {}
+last_position_send = 0
+position_send_interval = 0.05  # Send position every 50ms (20 times per second instead of 60+)
 
 COLOR_MAP = {
     "red": color.red, "orange": color.orange, "yellow": color.yellow,
@@ -198,6 +200,35 @@ def start_game(connection_sock, player_id, username, selected_color):
     USERNAME = username
     game_started = True
 
+    # Ensure server browser is completely hidden/destroyed
+    browser = get_current_browser()
+    if browser:
+        try:
+            if hasattr(browser, '_cleanup_ui'):
+                browser._cleanup_ui()
+            destroy(browser)
+        except:
+            pass
+    
+    # Also hide any remaining UI elements that might be parented to camera.ui
+    # This is a safety measure in case cleanup didn't catch everything
+    try:
+        for child in list(camera.ui.children):
+            # Check if it's a server browser UI element (buttons, text, panels, etc.)
+            if hasattr(child, 'text') and child.text and (
+                "KOŠICE ONLINE SERVERY" in child.text or 
+                "Searching for LAN servers" in child.text or
+                "Server nenájdený" in child.text or
+                "Kliknite server" in child.text or
+                "Hľadám servery" in child.text
+            ):
+                destroy(child)
+            elif hasattr(child, 'text') and child.text and ":" in child.text and child.text.replace(".", "").replace(":", "").isdigit():
+                # Likely a server IP button
+                destroy(child)
+    except:
+        pass
+
     threading.Thread(target=listen_thread, daemon=True).start()
 
     # Zvyšok je pôvodný setup scény a hráča
@@ -286,8 +317,15 @@ def on_server_selected(ip, username=None):
 # UPDATE LOOP
 # ----------------------------------------------------
 def create_remote(pid, pdata):
-    ent = Entity(model="cube", scale=1.2, color=COLOR_MAP.get(pdata["color"], color.red))
+    ent = Entity(model="cube", scale=1.2, color=COLOR_MAP.get(pdata["color"], color.red), collider="box")
     ent.position = Vec3(pdata["x"], pdata["y"], pdata["z"])
+    # Store player_id on entity for damage identification
+    ent.player_id = pid
+    # Make remote players damageable
+    player_mod._attach_health(ent)
+    # Initialize health from server data
+    ent.health = pdata.get("health", 100)
+    ent.max_health = pdata.get("max_health", 100)
     label = Text(text=pdata.get("name", ""), origin=(0, 0), world_space=True, scale=1)
     label.position = ent.position + Vec3(0, 1.2, 0)
     return {"entity": ent, "label": label}
@@ -303,6 +341,10 @@ def update_remote_players():
             other_players[pid]["entity"].position = Vec3(pdata["x"], pdata["y"], pdata["z"])
             other_players[pid]["label"].position = Vec3(pdata["x"], pdata["y"] + 1.2, pdata["z"])
             other_players[pid]["label"].text = pdata.get("name", "")
+            # Update health from server
+            if hasattr(other_players[pid]["entity"], "health"):
+                other_players[pid]["entity"].health = pdata.get("health", 100)
+                other_players[pid]["entity"].max_health = pdata.get("max_health", 100)
     for pid in list(other_players.keys()):
         if pid not in server_players:
             destroy(other_players[pid]["entity"])
@@ -311,8 +353,14 @@ def update_remote_players():
 
 
 def send_position():
+    global last_position_send
     if player is None or sock is None:
         return
+    # Throttle position updates to reduce network traffic
+    current_time = time.time()
+    if current_time - last_position_send < position_send_interval:
+        return
+    last_position_send = current_time
     pos = {"type": "position", "x": player.x, "y": player.y, "z": player.z}
     try:
         sock.sendall(json.dumps(pos).encode())
@@ -326,6 +374,16 @@ def update():
     if not pause_menu.paused:
         send_position()
         player_mod.update_local_player(player)
+        
+        # Sync local player health from server (server is authoritative)
+        # Only update if health actually changed to avoid unnecessary updates
+        if my_id and my_id in server_players:
+            server_health = server_players[my_id].get("health", 100)
+            if hasattr(player, "health") and abs(player.health - server_health) > 0.1:
+                player.health = server_health
+                if health_bar.player_health != server_health:
+                    health_bar.player_health = server_health
+                    health_bar.update_health_bar()
 
         # Enemies sú vypnuté, takže netreba ich updateovať
         # for enemy in enemies[:]:
@@ -338,8 +396,12 @@ def update():
     update_remote_players()
     gun.update()
     respawn.update()
-    leaderboard.update_visibility()
-    leaderboard.update_leaderboard()
+    # Only update leaderboard when visible (TAB is held)
+    if held_keys.get('tab'):
+        leaderboard.update_visibility()
+        leaderboard.update_leaderboard()
+    else:
+        leaderboard.update_visibility()  # Still need to check visibility to hide it
 
 
 def input(key):
