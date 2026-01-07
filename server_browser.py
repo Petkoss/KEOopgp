@@ -1,5 +1,5 @@
 from ursina import *
-import socket, threading, json
+import socket, threading, json, random
 
 PORT = 9999
 SCAN_TIMEOUT = 0.25
@@ -86,26 +86,77 @@ class ServerBrowser(Entity):
         self.title = Text(parent=camera.ui, text="Searching for LAN servers...", scale=2, y=0.3, origin=(0,0), x=0, z=-0.1)
         self._ui_elems.append(self.title)
 
-        # Refresh button
+        # Name input - simple text label and input field side by side
+        self.name_label = Text(
+            parent=camera.ui,
+            text="Zadaj meno:",
+            scale=1.3,
+            y=-0.25,
+            x=-0.15,
+            origin=(0, 0),
+            color=color.white,
+            z=-0.1
+        )
+        # Name input field with white background for visibility
+        self.name_input = InputField(
+            parent=camera.ui,
+            default_value="",
+            scale=(0.4, 0.1),
+            y=-0.25,
+            x=0.25,
+            origin=(0, 0),
+            character_limit=20,
+            color=color.white,  # White background
+            z=-0.1
+        )
+        # Set hover color to keep it bright
+        self.name_input.hover_color = color.rgb(255, 255, 255)
+        
+        # Set text color to black for visibility - try multiple times to ensure it works
+        def set_text_color():
+            try:
+                if hasattr(self.name_input, 'text_entity') and self.name_input.text_entity:
+                    self.name_input.text_entity.color = color.black
+                elif hasattr(self.name_input, 'text_field'):
+                    tf = self.name_input.text_field
+                    if hasattr(tf, 'text_entity') and tf.text_entity:
+                        tf.text_entity.color = color.black
+            except:
+                pass
+        
+        # Try immediately and after delay
+        set_text_color()
+        from ursina import invoke
+        invoke(set_text_color, delay=0.1)
+        invoke(set_text_color, delay=0.3)
+        
+        # Add a visible border around the input field
+        try:
+            border_scale = (self.name_input.scale_x * 1.05, self.name_input.scale_y * 1.05)
+            border = Entity(
+                parent=camera.ui,
+                model='quad',
+                scale=border_scale,
+                position=(self.name_input.x, self.name_input.y, self.name_input.z - 0.01),
+                color=color.rgb(100, 150, 255),  # Light blue border
+                z=-0.11
+            )
+            self._ui_elems.append(border)
+        except:
+            pass
+        self._ui_elems.append(self.name_label)
+        self._ui_elems.append(self.name_input)
+
+        # Refresh button - moved lower to accommodate name input
         self.refresh_btn = Button(
             parent=camera.ui,
             text="Refresh",
             scale=(0.75, 0.15),
-            y=-0.35,
+            y=-0.42,
             color=color.azure
         )
         self.refresh_btn.on_click = self.refresh
         self._ui_elems.append(self.refresh_btn)
-
-        # Manual IP input
-        self.ip_field = InputField(
-            parent=camera.ui,
-            default_value="",
-            scale=(0.9, 0.12),
-            y=-0.15,
-            character_limit=32
-        )
-        self._ui_elems.append(self.ip_field)
 
         threading.Thread(target=self._scan, daemon=True).start()
 
@@ -164,7 +215,16 @@ class ServerBrowser(Entity):
 
     # When a server is clicked
     def _choose(self, ip):
-        # Clean up UI immediately
+        # get player name
+        player_name = ""
+        try:
+            if hasattr(self, "name_input") and self.name_input:
+                player_name = (self.name_input.text or "").strip()
+        except:
+            player_name = ""
+        if not player_name:
+            player_name = f"Player{random.randint(1000,9999)}"
+
         self._cleanup_ui()
         
         # Disable all UI elements before destroying
@@ -182,17 +242,12 @@ class ServerBrowser(Entity):
 
         # Delay slightly to ensure UI is cleared before starting game
         from ursina import invoke
-        invoke(lambda: self.callback(ip), delay=0.05)
+        invoke(lambda: self.callback(ip, player_name), delay=0.05)
         
     # Refresh server list
     def refresh(self):
         self.title.text = "Hľadám servery..."
         threading.Thread(target=self._scan, daemon=True).start()
-
-    def _manual_connect(self):
-        ip = self.ip_field.text.strip() if self.ip_field else ""
-        if ip:
-            self._choose(ip)
 
     def _cleanup_ui(self):
         # destroy all tracked ui entities

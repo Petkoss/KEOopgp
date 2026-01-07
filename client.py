@@ -145,9 +145,12 @@ def receive_map_from_server(sock, initial_buffer: bytes = b""):
 # ----------------------------------------------------
 # CONNECT TO SERVER (used by server browser)
 # ----------------------------------------------------
-def connect_to_server(ip):
+def connect_to_server(ip, username=None):
     global USERNAME, server_map_path
-    USERNAME = f"Player{random.randint(1000,9999)}"
+    if username and username.strip():
+        USERNAME = username.strip()
+    else:
+        USERNAME = f"Player{random.randint(1000,9999)}"
     picked_color = random.choice(list(COLOR_MAP.keys()))
 
     try:
@@ -281,7 +284,7 @@ def start_game(connection_sock, player_id, username, selected_color):
 # ----------------------------------------------------
 # SERVER BROWSER CALLBACK
 # ----------------------------------------------------
-def on_server_selected(ip):
+def on_server_selected(ip, username=None):
     """Called when player clicks a server."""
 
     # Žiadny loading screen – len log do konzoly
@@ -289,10 +292,13 @@ def on_server_selected(ip):
 
     def _connect():
         try:
-            s, pid, username, color = connect_to_server(ip)
+            # Use the username parameter from outer scope
+            player_username = username
+            s, pid, player_username, color = connect_to_server(ip, player_username)
             if s:
+                # Run start_game on the main thread
                 from ursina import invoke
-                invoke(lambda: start_game(s, pid, username, color))
+                invoke(lambda: start_game(s, pid, player_username, color))
             else:
                 print("Connection failed.")
                 from ursina import invoke
