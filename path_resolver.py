@@ -39,11 +39,11 @@ def resolve_map_model_path(preferred: Path = None) -> Path | None:
             return preferred_path
 
     # 2) Potom hľadaj zabalenú mapu v assets
-    candidate = (get_asset_root() / "map" / "akozeke.glb").resolve()
+    candidate = (get_asset_root() / "map" / "maleakozeke.glb").resolve()
     if candidate.exists():
         return candidate
 
-    fallback = (Path.cwd() / "assets" / "map" / "akozeke.glb").resolve()
+    fallback = (Path.cwd() / "assets" / "map" / "maleakozeke.glb").resolve()
     if fallback.exists():
         return fallback
 
@@ -59,9 +59,9 @@ def get_map_paths():
     """Get list of all possible map file paths to check."""
     asset_root = get_asset_root()
     return [
-        asset_root / "map" / "akozeke.glb",
-        Path.cwd() / "assets" / "map" / "akozeke.glb",
-        Path(__file__).resolve().parent / "assets" / "map" / "akozeke.glb",
+        asset_root / "map" / "maleakozeke.glb",
+        Path.cwd() / "assets" / "map" / "maleakozeke.glb",
+        Path(__file__).resolve().parent / "assets" / "map" / "maleakozeke.glb",
     ]
 
 

@@ -163,12 +163,24 @@ class ServerBrowser(Entity):
                 print(f"Button create failed for {ip}: {e}")
 
     # When a server is clicked
-    # When a server is clicked
     def _choose(self, ip):
+        # Clean up UI immediately
         self._cleanup_ui()
-        destroy(self)
+        
+        # Disable all UI elements before destroying
+        for ent in self._ui_elems:
+            try:
+                ent.enabled = False
+            except:
+                pass
+        
+        # Destroy the browser entity
+        try:
+            destroy(self)
+        except:
+            pass
 
-    # Delay slightly to ensure UI is cleared before starting game
+        # Delay slightly to ensure UI is cleared before starting game
         from ursina import invoke
         invoke(lambda: self.callback(ip), delay=0.05)
         
@@ -196,9 +208,24 @@ class ServerBrowser(Entity):
 # ----------------------------
 # API FUNCTION
 # ----------------------------
+_current_browser = None
+
 def open_server_browser(callback):
     """
     Opens a server browser UI and calls `callback(ip)` when a server is clicked.
     """
-    browser = ServerBrowser(callback)
-    return browser
+    global _current_browser
+    # Clean up any existing browser first
+    if _current_browser:
+        try:
+            if hasattr(_current_browser, '_cleanup_ui'):
+                _current_browser._cleanup_ui()
+            destroy(_current_browser)
+        except:
+            pass
+    _current_browser = ServerBrowser(callback)
+    return _current_browser
+
+def get_current_browser():
+    """Get the current server browser instance"""
+    return _current_browser

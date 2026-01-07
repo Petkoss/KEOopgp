@@ -3,6 +3,7 @@ from enemy import Enemy
 import player as player_mod
 import crosshair
 import gun_effects
+import json
 
 # ------------------------------
 # GLOBALS
@@ -152,9 +153,24 @@ def shoot():
         target = hit_info.entity
         if isinstance(target, Enemy):
             target.take_damage(20)
-        elif player_mod.apply_player_damage(target, 20):
-            # Damage applied to another player target
-            pass
+        elif getattr(target, "is_player_target", False):
+            # Check if this is a remote player (has player_id attribute)
+            if hasattr(target, "player_id"):
+                # Remote player - send damage to server (server is authoritative)
+                try:
+                    import client
+                    if client.sock and client.my_id:
+                        damage_msg = {
+                            "type": "damage",
+                            "target_id": target.player_id,
+                            "amount": 20
+                        }
+                        client.sock.sendall(json.dumps(damage_msg).encode())
+                except:
+                    pass  # Server communication failed
+            else:
+                # Local player target (like static test models) - apply damage locally
+                player_mod.apply_player_damage(target, 20)
         else:
             create_bullet_hole(hit_info)
 
@@ -213,4 +229,6 @@ def handle_input(key):
 # UPDATE LOOP
 # ------------------------------
 def update():
-    hover_damage()
+    # Removed hover_damage() - it was doing expensive raycasts every frame
+    # Damage is now handled properly through the shoot() function
+    pass
