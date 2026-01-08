@@ -17,6 +17,7 @@ from enemy import Enemy
 import health_bar
 import respawn
 import leaderboard
+import scoreboard
 import player as player_mod
 
 from server_browser import open_server_browser, get_current_browser
@@ -56,6 +57,8 @@ def listen_thread():
             msg = json.loads(data.decode())
             if msg.get("type") == "players":
                 server_players = msg.get("players", {})
+                # Update scoreboard with player data
+                scoreboard.update_scoreboard_data(server_players)
                 if "leaderboard" in msg:
                     leaderboard.update_leaderboard_data(msg.get("leaderboard", []))
         except:
@@ -251,8 +254,11 @@ def start_game(connection_sock, player_id, username, selected_color):
     # Pause menu UI
     pause_menu.setup_pause_menu()
 
-    # Leaderboard UI
+    # Leaderboard UI (small top-right)
     leaderboard.setup_leaderboard(my_id)
+    
+    # Scoreboard UI (large center screen)
+    scoreboard.setup_scoreboard(my_id)
 
     # Player – posuň spawn trochu vyššie a dozadu, aby nebol vnútri budovy
     player = player_mod.setup_local_player(
@@ -396,12 +402,15 @@ def update():
     update_remote_players()
     gun.update()
     respawn.update()
-    # Only update leaderboard when visible (TAB is held)
+    # Update scoreboard when TAB is held (fullscreen)
+    # Always hide leaderboard - we only want scoreboard
+    leaderboard.set_visible(False)
+    
     if held_keys.get('tab'):
-        leaderboard.update_visibility()
-        leaderboard.update_leaderboard()
+        scoreboard.update_visibility()
+        scoreboard.update_scoreboard()
     else:
-        leaderboard.update_visibility()  # Still need to check visibility to hide it
+        scoreboard.update_visibility()  # Hide scoreboard when TAB is released
 
 
 def input(key):
