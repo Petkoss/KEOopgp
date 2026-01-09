@@ -146,7 +146,12 @@ def shoot():
     do_recoil()
     do_muzzle_flash()
     
+    # Build ignore list - include player, gun, and playermodel if it exists
     ignore = [player, gun] if gun else [player]
+    if player and hasattr(player, 'playermodel') and player.playermodel:
+        if player.playermodel not in ignore:
+            ignore.append(player.playermodel)
+    
     hit_info = raycast(camera.world_position, camera.forward, distance=50, ignore=ignore)
     
     if hit_info.hit:
@@ -201,7 +206,11 @@ def reload():
 def hover_damage():
     if not player or not shooting:
         return
+    # Build ignore list - include player, gun, and playermodel if it exists
     ignore = [player, gun] if gun else [player]
+    if player and hasattr(player, 'playermodel') and player.playermodel:
+        if player.playermodel not in ignore:
+            ignore.append(player.playermodel)
     hit_info = raycast(camera.world_position, camera.forward, distance=50, ignore=ignore)
     if not hit_info.hit:
         return

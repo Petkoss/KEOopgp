@@ -4,6 +4,30 @@ import socket, threading, json, random
 PORT = 9999
 SCAN_TIMEOUT = 0.25
 
+
+def fix_inputfield_textfield(input_field):
+    """
+    Fix TextField _active attribute issue that causes AttributeError.
+    This is a workaround for Ursina InputField/TextField initialization bug.
+    """
+    def _fix():
+        try:
+            if hasattr(input_field, 'text_field') and input_field.text_field:
+                tf = input_field.text_field
+                if not hasattr(tf, '_active'):
+                    tf._active = False
+        except:
+            pass
+    
+    # Apply fix immediately
+    _fix()
+    
+    # Also apply with delays to catch any late initialization
+    from ursina import invoke
+    invoke(_fix, delay=0.01)
+    invoke(_fix, delay=0.05)
+    invoke(_fix, delay=0.1)
+
 # ----------------------------
 # LAN SCAN
 # ----------------------------
@@ -109,6 +133,10 @@ class ServerBrowser(Entity):
             color=color.white,  # White background
             z=-0.1
         )
+        
+        # Fix: Initialize _active attribute on TextField to prevent AttributeError
+        fix_inputfield_textfield(self.name_input)
+        
         # Set hover color to keep it bright
         self.name_input.hover_color = color.rgb(255, 255, 255)
         
@@ -126,7 +154,6 @@ class ServerBrowser(Entity):
         
         # Try immediately and after delay
         set_text_color()
-        from ursina import invoke
         invoke(set_text_color, delay=0.1)
         invoke(set_text_color, delay=0.3)
         

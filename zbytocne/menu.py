@@ -9,6 +9,30 @@ play_button = None
 error_text = None
 selected_color = "red"
 
+
+def fix_inputfield_textfield(input_field):
+    """
+    Fix TextField _active attribute issue that causes AttributeError.
+    This is a workaround for Ursina InputField/TextField initialization bug.
+    """
+    def _fix():
+        try:
+            if hasattr(input_field, 'text_field') and input_field.text_field:
+                tf = input_field.text_field
+                if not hasattr(tf, '_active'):
+                    tf._active = False
+        except:
+            pass
+    
+    # Apply fix immediately
+    _fix()
+    
+    # Also apply with delays to catch any late initialization
+    from ursina import invoke
+    invoke(_fix, delay=0.01)
+    invoke(_fix, delay=0.05)
+    invoke(_fix, delay=0.1)
+
 COLOR_OPTIONS = ["red","orange","yellow","green","cyan","blue","violet","pink"]
 COLOR_MAP = {
     "red": color.red, "orange": color.orange, "yellow": color.yellow,
@@ -107,6 +131,8 @@ def create_menu():
     input_h = ph * 0.08
     name_input = InputField(parent=menu_panel, x=0, y=name_y - 0.06, scale=(input_w, input_h),
                             text="Player", max_length=20, color=color.white)
+    # Fix: Initialize _active attribute on TextField to prevent AttributeError
+    fix_inputfield_textfield(name_input)
     name_input.hover_color = color.white  # Keep white on hover
     _set_input_text_props(name_input, 0.06 * ui_scale * TEXT_MULTIPLIER, color.black)
     _add_border(name_input, border_width=0.004, border_color=color.rgb(150,150,150))
@@ -117,6 +143,8 @@ def create_menu():
                     scale=0.08 * ui_scale * TEXT_MULTIPLIER, color=color.light_gray, origin=(0,0))
     ip_input = InputField(parent=menu_panel, x=0, y=ip_y - 0.06, scale=(input_w, input_h),
                           text="127.0.0.1", max_length=45, color=color.white)
+    # Fix: Initialize _active attribute on TextField to prevent AttributeError
+    fix_inputfield_textfield(ip_input)
     ip_input.hover_color = color.white  # Keep white on hover
     _set_input_text_props(ip_input, 0.06 * ui_scale * TEXT_MULTIPLIER, color.black)
     _add_border(ip_input, border_width=0.004, border_color=color.rgb(150,150,150))

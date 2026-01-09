@@ -4,11 +4,11 @@ import json
 import random
 import time
 import os
+import killtrack
 
 LOCK = threading.Lock()
 clients = {}        # player_id -> {"conn": conn, "addr": addr}
-players = {}        # player_id -> {"x":..., "y":..., "z":..., "name":..., "color":..., "score":..., "health":...}
-scores = {}         # player_id -> score count
+players = {}        # player_id -> {"x":..., "y":..., "z":..., "name":..., "color":..., "health":...}
 health = {}         # player_id -> current health value
 MAX_HEALTH = 100
 next_id = 0
@@ -36,19 +36,21 @@ def get_local_ip():
 
 def broadcast_players():
     with LOCK:
-        # Include scores and health in player data
+        # Include kills and health in player data
         players_with_data = {}
         for pid, pdata in players.items():
             players_with_data[pid] = pdata.copy()
-            players_with_data[pid]["score"] = scores.get(pid, 0)
+            players_with_data[pid]["kills"] = killtrack.get_kills(pid)
             players_with_data[pid]["health"] = health.get(pid, MAX_HEALTH)
             players_with_data[pid]["max_health"] = MAX_HEALTH
+        
+        # Generate leaderboard using killtrack module
+        leaderboard = killtrack.get_leaderboard(players)
         
         data = json.dumps({
             "type": "players",
             "players": players_with_data,
-            "leaderboard": sorted([(pid, players[pid]["name"], scores.get(pid, 0)) for pid in players.keys()], 
-                                 key=lambda x: x[2], reverse=True)
+            "leaderboard": leaderboard
         }).encode()
         
         removed = []
@@ -60,8 +62,8 @@ def broadcast_players():
         for r in removed:
             if r in clients: del clients[r]
             if r in players: del players[r]
-            if r in scores: del scores[r]
             if r in health: del health[r]
+            killtrack.remove_player(r)  # Clean up kill tracking
 
 def load_map_file():
     """Load the bundled GLB map as raw bytes. Returns (data, filename) or (None, None)."""
@@ -148,8 +150,8 @@ def handle_client(conn, addr):
             else:
                 color = COLOR_POOL[int(player_id) % len(COLOR_POOL)]
             players[player_id] = {"x":0,"y":0,"z":0,"name":name,"color":color}
-            scores[player_id] = 0
             health[player_id] = MAX_HEALTH  # Initialize health
+            killtrack.initialize_player(player_id)  # Initialize kill tracking
 
         broadcast_players()
 
@@ -187,9 +189,9 @@ def handle_client(conn, addr):
                         # Apply damage
                         health[target_id] = max(0, health[target_id] - damage_amount)
                         
-                        # Award score to attacker if target dies
+                        # Award kill to attacker if target dies
                         if health[target_id] <= 0 and target_id in health:
-                            scores[attacker_id] = scores.get(attacker_id, 0) + 1
+                            killtrack.award_kill(attacker_id, target_id)
                             # Reset target health after death (respawn)
                             health[target_id] = MAX_HEALTH
                         
@@ -208,8 +210,8 @@ def handle_client(conn, addr):
                 except: pass
                 del clients[player_id]
             if player_id in players: del players[player_id]
-            if player_id in scores: del scores[player_id]
             if player_id in health: del health[player_id]
+            killtrack.remove_player(player_id)  # Clean up kill tracking
         broadcast_players()
 
 def start_server(port=9999):
