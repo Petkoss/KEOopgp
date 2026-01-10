@@ -2,6 +2,9 @@ from pathlib import Path
 from ursina import *
 from path_resolver import resolve_map_model_path
 
+# Global floor reference to prevent garbage collection
+_safety_floor = None
+
 
 def load_map(map_file_path=None):
     """
@@ -16,14 +19,35 @@ def load_map(map_file_path=None):
     model_path = resolve_map_model_path(preferred)
 
     # Veľký bezpečnostný floor (fyzika pod celou mapou, aj keď odídeš ďaleko)
+    # With cube model at position (0, 0, 0) and scale (5000, 10, 5000):
+    # The cube extends from -scale/2 to +scale/2, so y extends from -5 to +5
+    # Position at y=-5 so top is at y=0 (ground level), bottom at y=-10
     floor = Entity(
         model="cube",
-        scale=(5000, 5, 5000),   # výrazne väčší ako mapa
-        position=(0, -1, 0),     # o niečo nižšie pod mapou
+        scale=(5000, 10, 5000),   # výrazne väčší ako mapa, taller floor
+        position=(0, -5, 0),      # Floor top at y=0, bottom at y=-10
         collider="box",
         color=color.dark_gray,
         visible=False,
     )
+    # Ensure collider is properly set up and enabled
+    if floor.collider is None:
+        floor.collider = "box"
+    # Make sure the collider is enabled for physics collisions
+    if hasattr(floor.collider, 'enabled'):
+        floor.collider.enabled = True
+    # Ensure floor is static (doesn't move, but still has collisions)
+    try:
+        # Ursina's FirstPersonController needs the floor to have proper collision
+        # The floor should not be affected by physics itself, just provide collision
+        if hasattr(floor, 'physics'):
+            floor.physics = False  # Floor doesn't move
+    except:
+        pass
+    print(f"✓ Safety floor created at y=-5 (top at y=0, bottom at y=-10), collider={floor.collider}, enabled={getattr(floor.collider, 'enabled', 'N/A')}")
+    # Store floor globally so it doesn't get garbage collected
+    global _safety_floor
+    _safety_floor = floor
 
     if model_path is None:
         print("WARNING: No map file found.")
@@ -125,10 +149,12 @@ def load_map(map_file_path=None):
             import traceback
             traceback.print_exc()
 
-        # Floor necháme existovať s box colliderom ako „neviditeľnú“ podlahu.
+        # Floor necháme existovať s box colliderom ako „neviditeľnú" podlahu.
         # Ak ti prekáža vizuálne, môžeš dať: floor.visible = False
 
         print("✓ Map loaded successfully (mesh collider + box floor)")
+        # Return both the map and floor (map is primary, floor is safety net)
+        # The floor will persist since it's created earlier
         return forest_map
 
     except Exception as e:

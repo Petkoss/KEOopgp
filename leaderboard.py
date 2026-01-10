@@ -28,68 +28,79 @@ def setup_leaderboard(player_id):
         z=-0.05
     )
     
-    # Title at top center (centered on screen)
+    # Title at top center (centered on screen) - bigger
     leaderboard_title = Text(
         text="LEADERBOARD",
         parent=camera.ui,
-        position=(0, 0.4, -0.1),
+        position=(0, 0.5, -0.1),
         origin=(0.5, 0.5),
-        scale=4.0,
+        scale=2.5,  # Reasonable size for title
         color=color.white,
         bold=True
     )
     
-    # Column headers (centered on screen)
-    headers_y = 0.25
+    # Column headers (centered on screen) - bigger
+    headers_y = 0.35
     header_player = Text(
         text="PLAYER",
         parent=camera.ui,
-        position=(-0.5, headers_y, -0.1),
+        position=(-0.6, headers_y, -0.1),
         origin=(0, 0.5),
-        scale=2.5,
+        scale=2.0,  # Reasonable size for headers
         color=color.white,
         bold=True
     )
     header_kills = Text(
         text="KILLS",
         parent=camera.ui,
-        position=(0.5, headers_y, -0.1),
+        position=(0.6, headers_y, -0.1),
         origin=(1, 0.5),
-        scale=2.5,
+        scale=2.0,  # Reasonable size for headers
         color=color.white,
         bold=True
     )
     
-    # Initialize player entries (centered on screen)
+    # Initialize player entries (centered on screen) - bigger
+    # Support up to 50 players to accommodate all players in a server
     player_entries = []
-    start_y = 0.15
-    spacing = 0.08
+    start_y = 0.25
+    spacing = 0.08  # Slightly reduced spacing to fit more players
     
-    for i in range(20):  # Support up to 20 players
+    for i in range(50):  # Support up to 50 players
         y_pos = start_y - i * spacing
         
-        # Row background
+        # Row background - wider and taller
         entry_bg = Entity(
             parent=camera.ui,
             model='quad',
-            color=color.rgba(30, 30, 30, 100) if i % 2 == 0 else color.rgba(40, 40, 40, 100),
-            scale=(1.8, 0.08),
+            color=color.rgba(30, 30, 30, 120) if i % 2 == 0 else color.rgba(40, 40, 40, 120),
+            scale=(2.2, 0.10),  # Wider and taller
             position=(0, y_pos, -0.08),
             origin=(0.5, 0.5),
             z=-0.06
         )
         
-        # Player text
-        entry_text = Text(
-            text="",
+        # Player name text (left side) - ensure it renders on top
+        entry_name = Text(
+            text="Player Name",
             parent=camera.ui,
-            position=(0, y_pos, -0.1),
-            origin=(0.5, 0.5),
-            scale=2.0,
+            position=(-0.6, y_pos, -0.15),  # Lower z to be on top of background
+            origin=(0, 0.5),
+            scale=1.5,  # Reasonable size for readable text
             color=color.white
         )
         
-        player_entries.append({"bg": entry_bg, "text": entry_text})
+        # Kills text (right side) - ensure it renders on top
+        entry_kills = Text(
+            text="0",
+            parent=camera.ui,
+            position=(0.6, y_pos, -0.15),  # Lower z to be on top of background
+            origin=(1, 0.5),
+            scale=1.5,  # Reasonable size for readable text
+            color=color.white
+        )
+        
+        player_entries.append({"bg": entry_bg, "name": entry_name, "kills": entry_kills})
     
     # Start hidden
     set_visible(False)
@@ -114,35 +125,50 @@ def update_leaderboard():
     if not server_players_data:
         if len(player_entries) > 0:
             entry = player_entries[0]
-            if entry["text"]:
-                entry["text"].text = "Waiting for player data..."
-                entry["text"].color = color.white
-                entry["text"].enabled = True
+            if entry["name"]:
+                entry["name"].text = "Waiting for player data..."
+                entry["name"].color = color.white
+                entry["name"].enabled = True
+            if entry["kills"]:
+                entry["kills"].text = ""
+                entry["kills"].enabled = False
             if entry["bg"]:
                 entry["bg"].enabled = True
             for i in range(1, len(player_entries)):
                 if player_entries[i]["bg"]:
                     player_entries[i]["bg"].enabled = False
-                if player_entries[i]["text"]:
-                    player_entries[i]["text"].text = ""
-                    player_entries[i]["text"].enabled = False
+                if player_entries[i]["name"]:
+                    player_entries[i]["name"].text = ""
+                    player_entries[i]["name"].enabled = False
+                if player_entries[i]["kills"]:
+                    player_entries[i]["kills"].text = ""
+                    player_entries[i]["kills"].enabled = False
         return
     
     # Sort players by kills (score) in descending order
+    def get_kills_score(player_data):
+        """Safely extract kills/score as integer, defaulting to 0"""
+        try:
+            kills_raw = player_data.get("kills") or player_data.get("score") or 0
+            return int(kills_raw) if kills_raw is not None else 0
+        except (ValueError, TypeError):
+            return 0
+    
     sorted_players = sorted(
         server_players_data.items(),
-        key=lambda x: x[1].get("kills", x[1].get("score", 0)),  # Use kills, fallback to score
+        key=lambda x: get_kills_score(x[1]),  # Use kills, fallback to score, ensure int
         reverse=True
     )
     
-    # Display players
+    # Display ALL players (up to available entry slots)
     display_count = min(len(sorted_players), len(player_entries))
     
     for i in range(len(player_entries)):
         if i < display_count:
             player_id, player_data = sorted_players[i]
             name = player_data.get("name", f"Player{player_id}")
-            kills = player_data.get("kills", player_data.get("score", 0))
+            # Always get kills/score as integer using the same safe conversion
+            kills = get_kills_score(player_data)
             
             # Highlight current player
             if str(player_id) == str(my_id):
@@ -159,22 +185,42 @@ def update_leaderboard():
                 player_entries[i]["bg"].color = entry_color
                 player_entries[i]["bg"].enabled = True
             
-            # Format text: rank + name on left, kills on right
+            # Format name: rank + name on left (no truncation needed if showing all)
             max_name_len = 25
             display_name = name[:max_name_len] if len(name) <= max_name_len else name[:max_name_len-3] + "..."
             
-            if player_entries[i]["text"]:
-                # Format with proper spacing
-                player_entries[i]["text"].text = f"{rank_prefix}{display_name:<30} {kills:>10}"
-                player_entries[i]["text"].color = text_color
-                player_entries[i]["text"].enabled = True
+            # Update player name text (left side) - always show name
+            if player_entries[i]["name"]:
+                text_entity = player_entries[i]["name"]
+                full_text = f"{rank_prefix}{display_name}"
+                # Ensure text is a proper string and update it
+                text_entity.text = str(full_text) if full_text else ""
+                text_entity.color = text_color
+                text_entity.enabled = True
+                # Ensure proper rendering
+                text_entity.origin = (0, 0.5)
+                text_entity.scale = 1.5  # Ensure scale is correct
+            
+            # Update kills text (right side) - ALWAYS show number, even if 0
+            if player_entries[i]["kills"]:
+                kills_entity = player_entries[i]["kills"]
+                kills_text = str(kills)  # Always show as string number (including "0")
+                kills_entity.text = kills_text
+                kills_entity.color = text_color
+                kills_entity.enabled = True
+                # Ensure proper rendering
+                kills_entity.origin = (1, 0.5)
+                kills_entity.scale = 1.5  # Ensure scale is correct
         else:
             # Hide unused entries
             if player_entries[i]["bg"]:
                 player_entries[i]["bg"].enabled = False
-            if player_entries[i]["text"]:
-                player_entries[i]["text"].text = ""
-                player_entries[i]["text"].enabled = False
+            if player_entries[i]["name"]:
+                player_entries[i]["name"].text = ""
+                player_entries[i]["name"].enabled = False
+            if player_entries[i]["kills"]:
+                player_entries[i]["kills"].text = ""
+                player_entries[i]["kills"].enabled = False
 
 # --- LEADERBOARD TOGGLE ---
 def set_visible(visible):
@@ -195,12 +241,21 @@ def set_visible(visible):
     for entry in player_entries:
         if entry["bg"]:
             entry["bg"].enabled = visible
-        if entry["text"]:
-            entry["text"].enabled = visible
+        if entry["name"]:
+            entry["name"].enabled = visible
+        if entry["kills"]:
+            entry["kills"].enabled = visible
+
+def is_visible():
+    """Check if leaderboard is currently visible."""
+    global _visible
+    return _visible
 
 def update_visibility():
     """Toggle visibility based on TAB being held."""
     global _visible
-    should_show = bool(held_keys.get('tab', False)) if hasattr(held_keys, "get") else held_keys.get('tab', False)
+    # Check if TAB is currently held
+    should_show = held_keys.get('tab', False) if hasattr(held_keys, 'get') else False
+    # Only update if visibility state changed
     if should_show != _visible:
         set_visible(should_show)

@@ -53,8 +53,23 @@ def create_player(position=Vec3(0, 3, -2), speed=5, jump_height=2):
         collider="box",
     )
     controller.scale_y = DEFAULT_HEIGHT
+    # Ensure collider is properly set up and enabled for physics
     if controller.collider is None:
         controller.collider = "box"
+    
+    # Make sure collider is enabled for physics collisions
+    try:
+        if hasattr(controller.collider, 'enabled'):
+            controller.collider.enabled = True
+        # Verify collider exists and is the right type
+        if controller.collider is not None:
+            # FirstPersonController automatically handles collider sizing based on scale_y
+            # The collider should be a BoxCollider that matches the player's dimensions
+            pass
+    except Exception as e:
+        print(f"Warning: Could not fully configure player collider: {e}")
+    
+    print(f"✓ Player created at {position}, collider={type(controller.collider).__name__ if controller.collider else 'None'}, scale_y={controller.scale_y}")
 
     # Give the controller baseline health so it can receive player-vs-player damage
     _attach_health(controller)

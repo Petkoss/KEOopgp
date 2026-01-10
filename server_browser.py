@@ -278,14 +278,93 @@ class ServerBrowser(Entity):
 
     def _cleanup_ui(self):
         # destroy all tracked ui entities
-        for ent in self.buttons:
-            try: destroy(ent)
+        # First, properly clean up InputField to prevent TextField crashes
+        if hasattr(self, 'name_input') and self.name_input:
+            try:
+                # Disable InputField first
+                self.name_input.enabled = False
+                # Fix TextField _active attribute before destroying to prevent crashes
+                if hasattr(self.name_input, 'text_field') and self.name_input.text_field:
+                    tf = self.name_input.text_field
+                    # Ensure _active attribute exists and is False
+                    if not hasattr(tf, '_active'):
+                        tf._active = False
+                    else:
+                        tf._active = False
+                    # Disable TextField
+                    tf.enabled = False
+                    # Try to remove from scene's update list if possible
+                    try:
+                        from ursina import scene
+                        if hasattr(scene, 'entities') and tf in scene.entities:
+                            scene.entities.remove(tf)
+                    except:
+                        pass
+                # Try to remove InputField from scene's update list
+                try:
+                    from ursina import scene
+                    if hasattr(scene, 'entities') and self.name_input in scene.entities:
+                        scene.entities.remove(self.name_input)
+                except:
+                    pass
+                # Destroy the InputField
+                destroy(self.name_input)
+                self.name_input = None  # Clear reference
+            except Exception as e:
+                print(f"Error cleaning up name_input: {e}")
+                # Force clear reference even if destroy fails
+                try:
+                    self.name_input = None
+                except:
+                    pass
+        
+        # Destroy buttons first
+        for ent in list(self.buttons):
+            try: 
+                ent.enabled = False
+                destroy(ent)
             except: pass
         self.buttons.clear()
-        for ent in self._ui_elems:
-            try: destroy(ent)
+        
+        # Destroy all other UI elements
+        for ent in list(self._ui_elems):
+            try:
+                ent.enabled = False
+                # If it's an InputField, clean up its TextField
+                if hasattr(ent, '__class__') and 'InputField' in str(type(ent)):
+                    if hasattr(ent, 'text_field') and ent.text_field:
+                        tf = ent.text_field
+                        # Ensure _active attribute exists and is False
+                        if not hasattr(tf, '_active'):
+                            tf._active = False
+                        else:
+                            tf._active = False
+                        tf.enabled = False
+                        # Try to remove from scene's update list
+                        try:
+                            from ursina import scene
+                            if hasattr(scene, 'entities') and tf in scene.entities:
+                                scene.entities.remove(tf)
+                        except:
+                            pass
+                    # Try to remove InputField from scene's update list
+                    try:
+                        from ursina import scene
+                        if hasattr(scene, 'entities') and ent in scene.entities:
+                            scene.entities.remove(ent)
+                    except:
+                        pass
+                destroy(ent)
             except: pass
         self._ui_elems.clear()
+        
+        # Also destroy all children of the browser entity
+        if hasattr(self, 'children'):
+            for child in list(self.children):
+                try:
+                    child.enabled = False
+                    destroy(child)
+                except: pass
 
 # ----------------------------
 # API FUNCTION

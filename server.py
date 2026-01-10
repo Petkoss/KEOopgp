@@ -18,6 +18,8 @@ map_filename = None # Map filename
 # Broadcast throttling
 last_broadcast_time = {}
 broadcast_interval = 0.1  # Broadcast every 100ms (10 times per second instead of 60+)
+periodic_broadcast_interval = 0.5  # Periodic broadcast every 500ms to keep leaderboard fresh
+last_periodic_broadcast = 0
 
 COLOR_POOL = [
     "red","orange","yellow","green","cyan","blue","violet","pink"
@@ -35,21 +37,29 @@ def get_local_ip():
     return ip
 
 def broadcast_players():
+    """Broadcast player data including kills/points to all clients"""
     with LOCK:
         # Include kills and health in player data
+        # Get all tracked kills once for efficiency
+        all_tracked_kills = killtrack.get_all_kills()
         players_with_data = {}
         for pid, pdata in players.items():
             players_with_data[pid] = pdata.copy()
+            # Ensure kills are tracked - initialize if not already done
+            if pid not in all_tracked_kills:
+                killtrack.initialize_player(pid)
+                all_tracked_kills[pid] = 0  # Update local copy
+            # Always include kills/points, default to 0 if missing
             players_with_data[pid]["kills"] = killtrack.get_kills(pid)
             players_with_data[pid]["health"] = health.get(pid, MAX_HEALTH)
             players_with_data[pid]["max_health"] = MAX_HEALTH
         
-        # Generate leaderboard using killtrack module
+        # Generate leaderboard using killtrack module (for reference, clients use players_with_data)
         leaderboard = killtrack.get_leaderboard(players)
         
         data = json.dumps({
             "type": "players",
-            "players": players_with_data,
+            "players": players_with_data,  # This contains all player data including kills
             "leaderboard": leaderboard
         }).encode()
         
@@ -214,8 +224,29 @@ def handle_client(conn, addr):
             killtrack.remove_player(player_id)  # Clean up kill tracking
         broadcast_players()
 
+def periodic_broadcast_loop():
+    """Periodically broadcast player data to keep leaderboard fresh"""
+    global last_periodic_broadcast
+    while True:
+        try:
+            current_time = time.time()
+            # Broadcast every 500ms if there are clients connected
+            # broadcast_players() has its own lock, so no need to lock here
+            if current_time - last_periodic_broadcast >= periodic_broadcast_interval:
+                with LOCK:
+                    has_clients = len(clients) > 0
+                if has_clients:  # Only broadcast if there are connected clients
+                    broadcast_players()
+                last_periodic_broadcast = current_time
+            time.sleep(0.1)  # Check every 100ms
+        except:
+            time.sleep(0.5)
+
 def start_server(port=9999):
     load_map_file()  # Load map on server start
+    
+    # Start periodic broadcast thread to keep leaderboard data fresh
+    threading.Thread(target=periodic_broadcast_loop, daemon=True).start()
     
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind(("0.0.0.0", port))

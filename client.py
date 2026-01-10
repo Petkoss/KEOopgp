@@ -200,34 +200,138 @@ def start_game(connection_sock, player_id, username, selected_color):
     USERNAME = username
     game_started = True
 
+    # First, ensure all InputFields are disabled and fixed to prevent TextField crashes
+    try:
+        from ursina import scene
+        # Fix all InputFields in the scene before starting game
+        if hasattr(scene, 'entities'):
+            for ent in list(scene.entities):
+                try:
+                    if hasattr(ent, '__class__') and 'InputField' in str(type(ent)):
+                        ent.enabled = False
+                        if hasattr(ent, 'text_field') and ent.text_field:
+                            tf = ent.text_field
+                            if not hasattr(tf, '_active'):
+                                tf._active = False
+                            tf.enabled = False
+                except:
+                    pass
+    except:
+        pass
+
     # Ensure server browser is completely hidden/destroyed
     browser = get_current_browser()
     if browser:
         try:
+            # First, properly clean up InputField objects to prevent TextField crashes
+            if hasattr(browser, 'name_input') and browser.name_input:
+                try:
+                    # Disable and fix TextField before destroying
+                    browser.name_input.enabled = False
+                    if hasattr(browser.name_input, 'text_field') and browser.name_input.text_field:
+                        tf = browser.name_input.text_field
+                        if not hasattr(tf, '_active'):
+                            tf._active = False
+                        tf.enabled = False
+                    # Remove from scene before destroying
+                    if hasattr(browser.name_input, 'remove_node'):
+                        browser.name_input.remove_node()
+                except Exception as e:
+                    print(f"Error cleaning up InputField: {e}")
+            
+            # Clean up all UI elements first
             if hasattr(browser, '_cleanup_ui'):
                 browser._cleanup_ui()
+            if hasattr(browser, '_ui_elems'):
+                for ent in list(browser._ui_elems):
+                    try:
+                        # Properly disable InputFields before destroying
+                        if hasattr(ent, '__class__') and 'InputField' in str(type(ent)):
+                            ent.enabled = False
+                            if hasattr(ent, 'text_field') and ent.text_field:
+                                tf = ent.text_field
+                                if not hasattr(tf, '_active'):
+                                    tf._active = False
+                                tf.enabled = False
+                        destroy(ent)
+                    except:
+                        pass
+            if hasattr(browser, 'buttons'):
+                for btn in list(browser.buttons):
+                    try:
+                        destroy(btn)
+                    except:
+                        pass
+            # Destroy all children
+            if hasattr(browser, 'children'):
+                for child in list(browser.children):
+                    try:
+                        destroy(child)
+                    except:
+                        pass
+            # Finally destroy the browser entity itself
             destroy(browser)
-        except:
-            pass
+        except Exception as e:
+            print(f"Error cleaning up server browser: {e}")
     
-    # Also hide any remaining UI elements that might be parented to camera.ui
-    # This is a safety measure in case cleanup didn't catch everything
+    # Also clean up any remaining server browser UI elements from camera.ui
+    # This is a thorough cleanup in case anything was missed
     try:
-        for child in list(camera.ui.children):
-            # Check if it's a server browser UI element (buttons, text, panels, etc.)
-            if hasattr(child, 'text') and child.text and (
-                "KOŠICE ONLINE SERVERY" in child.text or 
-                "Searching for LAN servers" in child.text or
-                "Server nenájdený" in child.text or
-                "Kliknite server" in child.text or
-                "Hľadám servery" in child.text
-            ):
-                destroy(child)
-            elif hasattr(child, 'text') and child.text and ":" in child.text and child.text.replace(".", "").replace(":", "").isdigit():
-                # Likely a server IP button
-                destroy(child)
-    except:
-        pass
+        cleanup_attempts = 0
+        max_attempts = 3
+        while cleanup_attempts < max_attempts:
+            found_any = False
+            for child in list(camera.ui.children):
+                try:
+                    # Check if it's an InputField and properly clean it up
+                    if hasattr(child, '__class__') and 'InputField' in str(type(child)):
+                        should_destroy = True
+                        # Fix TextField before destroying
+                        child.enabled = False
+                        if hasattr(child, 'text_field') and child.text_field:
+                            tf = child.text_field
+                            if not hasattr(tf, '_active'):
+                                tf._active = False
+                            tf.enabled = False
+                    else:
+                        # Check if it's a server browser UI element
+                        should_destroy = False
+                        if hasattr(child, 'text') and child.text:
+                            text_lower = child.text.lower()
+                            if any(keyword in text_lower for keyword in [
+                                "košice online servery", "searching for lan servers",
+                                "server nenájdený", "kliknite server", "hľadám servery",
+                                "zadaj meno", "refresh"
+                            ]):
+                                should_destroy = True
+                            elif ":" in child.text and len(child.text.split(":")) == 2:
+                                # Likely a server IP:PORT button
+                                parts = child.text.replace(":", " ").split()
+                                if len(parts) == 2 and all(p.replace(".", "").isdigit() for p in parts):
+                                    should_destroy = True
+                        
+                        # Also check if it's a Panel with dark background (server browser background)
+                        if hasattr(child, 'model') and hasattr(child, 'color'):
+                            if child.model == 'quad' and hasattr(child.color, 'a') and child.color.a > 0.5:
+                                # Could be server browser background panel
+                                if hasattr(child, 'scale') and child.scale_x > 10 and child.scale_y > 8:
+                                    should_destroy = True
+                    
+                    if should_destroy:
+                        destroy(child)
+                        found_any = True
+                except:
+                    pass
+            
+            if not found_any:
+                break
+            cleanup_attempts += 1
+            
+            # Small delay between cleanup attempts
+            from ursina import invoke
+            invoke(lambda: None, delay=0.01)
+    except Exception as e:
+        print(f"Error in secondary server browser cleanup: {e}")
 
     threading.Thread(target=listen_thread, daemon=True).start()
 
@@ -236,6 +340,9 @@ def start_game(connection_sock, player_id, username, selected_color):
     DirectionalLight(y=10, rotation=(45, -45, 0), shadows=False)
     AmbientLight(color=color.rgba(100, 100, 100, 0.5))
     Sky()
+
+    # IMPORTANT: Don't create floor here - map_loader will create it
+    # This prevents duplicate floors that cause collision issues
 
     # Load map (from server if available, otherwise local)
     try:
@@ -254,9 +361,10 @@ def start_game(connection_sock, player_id, username, selected_color):
     # Leaderboard UI (fullscreen, shown when TAB is held)
     leaderboard.setup_leaderboard(my_id)
 
-    # Player – posuň spawn trochu vyššie a dozadu, aby nebol vnútri budovy
+    # Player – spawn well above the floor to ensure proper collision detection
+    # Floor top is at y=0, spawn player at y=10 to be safely above ground
     player = player_mod.setup_local_player(
-        position=Vec3(0, 4, -20),
+        position=Vec3(0, 10, -20),
         normal_speed=5,
         sprint_speed=10,
         jump_height=2,
@@ -396,9 +504,10 @@ def update():
     update_remote_players()
     gun.update()
     respawn.update()
-    # Update leaderboard visibility and content when TAB is held (fullscreen)
+    # Update leaderboard visibility - only show when TAB is held
     leaderboard.update_visibility()
-    if held_keys.get('tab'):
+    # Only update content when leaderboard is visible (TAB held)
+    if leaderboard.is_visible() and held_keys.get('tab'):
         leaderboard.update_leaderboard()
 
 
