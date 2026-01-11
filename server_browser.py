@@ -2,8 +2,7 @@ from ursina import *
 import socket, threading, json, random
 
 PORT = 9999
-SCAN_TIMEOUT = 0.3  # Slightly increased timeout for better reliability
-MAX_CONCURRENT_THREADS = 50  # Limit concurrent threads to avoid overwhelming the system
+SCAN_TIMEOUT = 0.25
 
 
 def fix_inputfield_textfield(input_field):
@@ -33,76 +32,27 @@ def fix_inputfield_textfield(input_field):
 # LAN SCAN
 # ----------------------------
 def ping_server(ip):
-    """Try to connect to a server and verify it's a game server"""
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(SCAN_TIMEOUT)
         s.connect((ip, PORT))
-        # Server should immediately send player ID JSON
         data = s.recv(4096)
-        if not data:
-            return False
         js = json.loads(data.decode())
         if "id" in js:
-            print(f"[Server Browser] Found server at {ip}:{PORT}")
             return True
         return False
-    except socket.timeout:
-        # Timeout is normal for IPs without servers
-        return False
-    except json.JSONDecodeError:
-        # Not a valid game server response
-        return False
-    except Exception as e:
-        # Other errors (connection refused, etc.) are normal
-        return False
-    finally:
-        try: 
-            s.close()
-        except: 
-            pass
-
-def get_local_ip():
-    """Get the actual local network IP address (same method as server.py)"""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
     except:
-        # Fallback to hostname method
-        try:
-            ip = socket.gethostbyname(socket.gethostname())
-        except:
-            ip = "127.0.0.1"
+        return False
     finally:
-        s.close()
-    return ip
+        try: s.close()
+        except: pass
 
 def scan_lan(extra_subnets=None):
-    # Use the same method as server.py to get local IP
-    local_ip = get_local_ip()
+    local_ip = socket.gethostbyname(socket.gethostname())
     primary_subnet = ".".join(local_ip.split(".")[:3])
-    
-    print(f"[Server Browser] Local IP: {local_ip}, Primary subnet: {primary_subnet}")
-    
-    # Common subnets to scan (in case devices are on different subnets)
-    common_subnets = {
-        primary_subnet,  # Primary subnet from local IP
-        "192.168.0",     # Common home router subnet
-        "192.168.1",     # Common home router subnet
-        "192.168.137",   # Windows hotspot subnet
-        "10.0.0",        # Some corporate networks
-    }
-    
-    subnets = common_subnets.copy()
+    subnets = {primary_subnet}
     if extra_subnets:
         subnets.update(extra_subnets)
-    
-    # Remove 127.0.0 if somehow it got in there
-    subnets.discard("127.0.0")
-    
-    print(f"[Server Browser] Scanning subnets: {subnets}")
-    
     found = []
     threads = []
 
@@ -110,35 +60,16 @@ def scan_lan(extra_subnets=None):
         if ping_server(ip):
             found.append(ip)
 
-    # Use a semaphore to limit concurrent threads
-    import threading as th
-    semaphore = th.Semaphore(MAX_CONCURRENT_THREADS)
-    
-    def worker_with_limit(ip):
-        with semaphore:
-            if ping_server(ip):
-                found.append(ip)
-    
     for subnet in subnets:
         for i in range(1, 255):
             ip = f"{subnet}.{i}"
-            t = threading.Thread(target=worker_with_limit, args=(ip,))
-            t.daemon = True  # Make threads daemon so they don't block shutdown
+            t = threading.Thread(target=worker, args=(ip,))
             t.start()
             threads.append(t)
 
-    # Wait for all threads to complete (with timeout to avoid hanging)
-    import time
-    start_time = time.time()
-    timeout = 10.0  # Maximum 10 seconds for scanning
-    
     for t in threads:
-        remaining_time = timeout - (time.time() - start_time)
-        if remaining_time <= 0:
-            break
-        t.join(timeout=min(remaining_time, 1.0))  # Join with timeout
-    
-    print(f"[Server Browser] Scan complete. Found {len(found)} server(s): {found}")
+        t.join()
+
     return found
 
 # ----------------------------
@@ -262,8 +193,8 @@ class ServerBrowser(Entity):
             return
         self._scanning = True
         try:
-            # Scan common subnets - scan_lan() now handles multiple subnets automatically
-            servers = scan_lan()
+            # Try primary subnet and a common Windows hotspot subnet (192.168.137.x)
+            servers = scan_lan(extra_subnets={"192.168.137"})
             # Ensure UI updates occur on main thread to avoid Panda3D NodePath asserts
             from ursina import invoke
             invoke(lambda: self._safe_display(servers))

@@ -196,21 +196,30 @@ def handle_client(conn, addr):
                     damage_amount = float(d.get("amount", 0))
                     attacker_id = player_id
                     
+                    print(f"DEBUG: Damage received - target_id={target_id}, amount={damage_amount}, attacker_id={attacker_id}")
+                    
                     # Validate: can't damage yourself, target must exist, attacker must exist
                     if (target_id and target_id != attacker_id and 
                         target_id in players and target_id in health and
                         attacker_id in players):
+                        old_health = health[target_id]
                         # Apply damage
                         health[target_id] = max(0, health[target_id] - damage_amount)
+                        new_health = health[target_id]
+                        
+                        print(f"DEBUG: Damage applied - target {target_id}: {old_health} -> {new_health} (damage: {damage_amount})")
                         
                         # Award kill to attacker if target dies
                         if health[target_id] <= 0 and target_id in health:
+                            print(f"DEBUG: Target {target_id} died, awarding kill to {attacker_id}")
                             killtrack.award_kill(attacker_id, target_id)
                             # Reset target health after death (respawn)
                             health[target_id] = MAX_HEALTH
                         
                         # Damage events should broadcast immediately
                         should_broadcast = True
+                    else:
+                        print(f"DEBUG: Damage validation failed - target_id={target_id}, attacker_id={attacker_id}, target_exists={target_id in players if target_id else False}, attacker_exists={attacker_id in players}")
             
             # Broadcast if needed
             if should_broadcast:

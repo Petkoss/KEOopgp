@@ -229,7 +229,7 @@ def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0, model_path=None)
             position=adjusted_position,
             scale=(0.3 * scale, cube_height, 0.3 * scale),  # Tall cube
             collider="box",  # Box collider for hit detection
-            color=color.gray,
+            color=color.white,  # White cube for visibility
             visible=True,  # Ensure it's visible
             enabled=True,  # Ensure it's enabled
         )
@@ -242,9 +242,11 @@ def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0, model_path=None)
             except:
                 pass
         
+        # Mark as player target immediately (will be set again in player.py, but this ensures it's set)
+        ent.is_player_target = True
+        
         # DO NOT exclude from raycast - we want it to be hittable
         # The entity will be treated as a player target and can take damage
-        print(f"DEBUG: Created static playermodel entity at {adjusted_position}, scale={ent.scale}, collider={ent.collider}")
         
     except Exception as e:
         print(f"Error: Could not create static playermodel: {e}")
@@ -256,7 +258,7 @@ def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0, model_path=None)
             position=adjusted_position,
             scale=(0.3 * scale, cube_height, 0.3 * scale),
             collider="box",
-            color=color.gray,
+            color=color.white,  # White cube for visibility
         )
     
     return ent

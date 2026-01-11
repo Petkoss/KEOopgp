@@ -129,9 +129,14 @@ def update_local_player(controller):
     playermodel.update_player_animation(controller)
 
 
-def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0):
+def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0, max_health=100):
     """
     Spawn a non-moving tall cube model in the world that can be damaged and destroyed.
+    
+    Args:
+        position: World position to spawn at
+        scale: Scale multiplier for the model
+        max_health: Maximum health points (default: 100)
     """
     ent = playermodel.spawn_static_playermodel(position=position, scale=scale)
     
@@ -139,17 +144,14 @@ def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0):
     def on_death():
         """Destroy the entity when it dies."""
         if ent and hasattr(ent, 'enabled'):
+            print(f"💀 Static playermodel destroyed! Health reached 0.")
             destroy(ent)
-            print("Static playermodel destroyed!")
     
-    # Attach health with death callback
-    _attach_health(ent, on_death=on_death)
+    # Attach health with death callback and custom max_health
+    _attach_health(ent, max_health=max_health, on_death=on_death)
     
-    # Debug: verify the entity is set up correctly
-    print(f"✓ Static playermodel spawned at {position}, scale={scale}")
-    print(f"  - is_player_target: {getattr(ent, 'is_player_target', False)}")
-    print(f"  - health: {getattr(ent, 'health', 'N/A')}")
-    print(f"  - collider: {getattr(ent, 'collider', 'N/A')}")
+    # Ensure the entity is marked as a player target
+    ent.is_player_target = True
     
     return ent
 

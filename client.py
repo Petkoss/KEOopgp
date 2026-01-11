@@ -398,8 +398,8 @@ def start_game(connection_sock, player_id, username, selected_color):
     # Store it globally so we can reference it
     global static_test_player
     base_pos = Vec3(5, 0, 5)  # Position on top of floor block (y=0 is top of block)
-    static_test_player = player_mod.spawn_static_playermodel(position=base_pos, scale=2.0)  # Made taller (was 1.2)
-    print(f"✓ Static test player stored globally: {static_test_player}")
+    # Spawn white cube with 100 health - it will be destroyed after 5 shots (20 damage each)
+    static_test_player = player_mod.spawn_static_playermodel(position=base_pos, scale=2.0, max_health=100)
 
 
 # ----------------------------------------------------

@@ -157,68 +157,47 @@ def shoot():
         from ursina import scene
         for ent in scene.entities:
             if hasattr(ent, 'model') and ent.model == 'cube' and hasattr(ent, 'scale'):
-                # Check if it's the floor block (large flat cube)
-                if ent.scale[1] == 1 and ent.scale[0] > 50 and ent.scale[2] > 50:
+                # Check if it's the floor block (large flat cube) - NOT player targets
+                if (ent.scale[1] == 1 and ent.scale[0] > 50 and ent.scale[2] > 50 and 
+                    not getattr(ent, 'is_player_target', False)):
                     if ent not in ignore:
                         ignore.append(ent)
                     break
     except:
         pass
     
-    hit_info = raycast(camera.world_position, camera.forward, distance=100, ignore=ignore)  # Increased distance
+    hit_info = raycast(camera.world_position, camera.forward, distance=100, ignore=ignore)
     
     if hit_info.hit:
         target = hit_info.entity
-        print(f"DEBUG: Hit entity!")
-        print(f"  - model: {getattr(target, 'model', 'N/A')}")
-        print(f"  - position: {getattr(target, 'position', 'N/A')}")
-        print(f"  - is_player_target: {getattr(target, 'is_player_target', False)}")
-        print(f"  - has player_id: {hasattr(target, 'player_id')}")
-        print(f"  - health: {getattr(target, 'health', 'N/A')}")
-        print(f"  - enabled: {getattr(target, 'enabled', 'N/A')}")
-        print(f"  - visible: {getattr(target, 'visible', 'N/A')}")
+        damage_amount = 20
         
         if isinstance(target, Enemy):
-            target.take_damage(20)
-        elif getattr(target, "is_player_target", False):
-            # Check if this is a remote player (has player_id attribute)
-            if hasattr(target, "player_id"):
-                # Remote player - send damage to server (server is authoritative)
-                try:
-                    import client
-                    if client.sock and client.my_id:
-                        damage_msg = {
-                            "type": "damage",
-                            "target_id": target.player_id,
-                            "amount": 20
-                        }
-                        client.sock.sendall(json.dumps(damage_msg).encode())
-                        print(f"Sent damage to remote player {target.player_id}")
-                except:
-                    pass  # Server communication failed
-            else:
-                # Local player target (like static test models) - apply damage locally
-                print(f"Attempting to apply damage to local player target...")
-                old_health = getattr(target, 'health', 0)
-                damage_applied = player_mod.apply_player_damage(target, 20)
-                new_health = getattr(target, 'health', 0)
-                if damage_applied:
-                    print(f"✓ Damage applied! Health: {old_health} -> {new_health}/{getattr(target, 'max_health', 'N/A')}")
-                    if new_health <= 0:
-                        print(f"✓ Entity should be destroyed now!")
-                else:
-                    print(f"✗ Damage NOT applied - apply_player_damage returned False")
-                    print(f"  - is_player_target check: {getattr(target, 'is_player_target', False)}")
+            target.take_damage(damage_amount)
+        elif hasattr(target, "player_id"):
+            # Remote player - send damage to server
+            try:
+                import client
+                if client.sock and client.my_id:
+                    damage_msg = {
+                        "type": "damage",
+                        "target_id": str(target.player_id),
+                        "amount": damage_amount
+                    }
+                    client.sock.sendall(json.dumps(damage_msg).encode())
+            except:
+                pass
         else:
-            # Debug: print what we hit if it's not a recognized target
-            if hasattr(target, 'model'):
-                print(f"Hit non-target entity: {target.model}, is_player_target={getattr(target, 'is_player_target', False)}")
-            create_bullet_hole(hit_info)
-    else:
-        print("DEBUG: Raycast did not hit anything")
-        print(f"  - Raycast from: {camera.world_position}")
-        print(f"  - Raycast direction: {camera.forward}")
-        print(f"  - Ignore list length: {len(ignore)}")
+            # Local target (static cubes, etc.) - apply damage directly
+            # Ensure it's a player target and has health
+            if not getattr(target, 'is_player_target', False):
+                target.is_player_target = True
+            if not hasattr(target, 'health'):
+                player_mod._attach_health(target, max_health=100)
+            
+            # Apply damage
+            player_mod.apply_player_damage(target, damage_amount)
+        create_bullet_hole(hit_info)
 
 def shooting_loop():
     if shooting and mouse.left and not reloading:
