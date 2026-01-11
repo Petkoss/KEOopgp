@@ -1,5 +1,6 @@
 from ursina import *
 import math
+from pathlib import Path
 
 # Player model configuration
 DEFAULT_Y_OFFSET = 1.2
@@ -23,47 +24,66 @@ def _exclude_from_raycast(entity, controller=None):
     # Disable collision detection on the nodePath
     try:
         if hasattr(entity, 'nodePath') and entity.nodePath:
+            # Set collide mask to 0 to exclude from all collision/raycast checks
             entity.nodePath.setCollideMask(0)
-    except:
+            # Also try to exclude from traversals
+            entity.nodePath.setTag('raycast_ignore', '1')
+            # Hide from camera culling to prevent traversal issues
+            entity.nodePath.hide()
+            entity.nodePath.show()  # Show the model but exclude from raycast
+    except Exception as e:
+        # Silently ignore if we can't modify the nodePath
         pass
 
 
 def attach_playermodel_to_controller(controller, model_path=None):
     """
-    Attach a minimal placeholder entity to a FirstPersonController.
-    Since the playermodel is invisible, we use a simple placeholder to avoid
-    loading FBX files that contain problematic animation channels.
+    Attach a tall cube model to a FirstPersonController (reaches POV).
     
     Args:
         controller: The FirstPersonController to attach the model to
         model_path: Not used (kept for compatibility)
         
     Returns:
-        True if placeholder was successfully attached, False otherwise
+        True if model was successfully attached, False otherwise
     """
     try:
-        # Create a minimal invisible placeholder entity
-        # We don't load the FBX because it contains animation channels that cause crashes
+        # Create a tall cube that reaches the POV
+        # The cube is scaled to match the player height (scale_y = 2.4)
+        # Position it so it extends from the ground to the camera height
         controller.playermodel = Entity(
             parent=controller,
-            model='cube',  # Simple cube model, no animations
-            scale=0.01,    # Tiny, invisible
-            y=-0.4,
+            model='cube',
+            scale=(0.3, 2.4, 0.3),  # Tall cube: width/depth 0.3, height 2.4 to match player height
+            y=1.2,  # Center the cube vertically (half of 2.4)
             visible=False,  # Hidden for first-person view
         )
         
-        # Exclude from raycast traversal
+        # Exclude from raycast traversal - CRITICAL to prevent raycast errors
         _exclude_from_raycast(controller.playermodel, controller)
         
-        # Don't set controller.animations - it conflicts with Ursina's internal animation system
-        # Ursina uses animations as a list for animation sequences, not a dict
-        # We don't need to track animations since we're not using them anyway
+        # No animations needed for cube
         controller._playermodel_animations_disabled = True
+        controller._has_animations = False
+        
+        print("✓ Tall cube playermodel attached")
         
         return True
         
     except Exception as e:
-        print(f"Warning: Could not create playermodel placeholder: {e}")
+        print(f"Warning: Could not create playermodel: {e}")
+        # Fallback to cube placeholder
+        try:
+            controller.playermodel = Entity(
+                parent=controller,
+                model='cube',
+                scale=(0.3, 2.4, 0.3),
+                y=1.2,
+                visible=False,
+            )
+            _exclude_from_raycast(controller.playermodel, controller)
+        except:
+            pass
         controller.playermodel = None
         controller._playermodel_animations_disabled = True
         return False
@@ -71,8 +91,9 @@ def attach_playermodel_to_controller(controller, model_path=None):
 
 def update_player_animation(controller):
     """
-    Update head/torso bob animation based on movement state.
-    Simplified version that only handles head bob (no model animations).
+    Update player animations based on movement state.
+    Handles both FBX model animations and head/torso bob.
+    Note: Model animations are disabled to prevent assertion errors, but head bob still works.
     
     Args:
         controller: The FirstPersonController with attached playermodel
@@ -83,6 +104,9 @@ def update_player_animation(controller):
     if not hasattr(controller, "playermodel") or controller.playermodel is None:
         return
     
+    # Check if animations are disabled (they are, to prevent assertion errors)
+    animations_disabled = getattr(controller, '_playermodel_animations_disabled', False)
+    
     try:
         pm = controller.playermodel
         if not pm or not hasattr(pm, 'y'):
@@ -90,12 +114,80 @@ def update_player_animation(controller):
         
         # Check if player is moving
         moving = any(held_keys.get(k, 0) for k in ("w", "a", "s", "d", "q", "e"))
+        sprinting = held_keys.get("left control", False) and moving
+        
+        # Skip FBX model animations if disabled (they cause assertion errors)
+        # But still do head bob animation
+        if not animations_disabled:
+            # Determine animation state
+            if sprinting:
+                target_animation = "run"
+            elif moving:
+                target_animation = "walk"
+            else:
+                target_animation = "idle"
+            
+            # Update FBX model animations if available
+            if getattr(controller, '_has_animations', False):
+                try:
+                    # Check if animation changed
+                    current_anim = getattr(controller, '_current_animation', None)
+                    if current_anim != target_animation:
+                        controller._current_animation = target_animation
+                        
+                        # Try to play the animation
+                        # Ursina animations can be accessed through the model or entity
+                        try:
+                            # Method 1: Try entity animations
+                            if hasattr(pm, 'animations'):
+                                anims = pm.animations
+                                if isinstance(anims, dict) and target_animation in anims:
+                                    pm.animations[target_animation].play()
+                                elif isinstance(anims, list) and len(anims) > 0:
+                                    # If it's a list, try common animation names
+                                    for anim in anims:
+                                        if target_animation.lower() in str(anim).lower():
+                                            anim.play()
+                                            break
+                            
+                            # Method 2: Try model animations
+                            if hasattr(pm, 'model') and pm.model:
+                                if hasattr(pm.model, 'animations'):
+                                    anims = pm.model.animations
+                                    if isinstance(anims, dict) and target_animation in anims:
+                                        pm.model.animations[target_animation].play()
+                                    elif isinstance(anims, list) and len(anims) > 0:
+                                        for anim in anims:
+                                            if target_animation.lower() in str(anim).lower():
+                                                anim.play()
+                                                break
+                            
+                            # Method 3: Try direct animation access via nodePath
+                            if hasattr(pm, 'nodePath') and pm.nodePath:
+                                # Try common animation names
+                                anim_names = [target_animation, f"{target_animation}_loop", f"Armature|{target_animation}"]
+                                for anim_name in anim_names:
+                                    try:
+                                        anim = pm.nodePath.find(f"**/{anim_name}")
+                                        if anim and not anim.isEmpty():
+                                            # Animation found, play it
+                                            pass  # Ursina handles this automatically
+                                            break
+                                    except:
+                                        pass
+                        except Exception as anim_error:
+                            # Silently continue if animation play fails
+                            pass
+                except Exception as e:
+                    # Animation system error, continue with head bob
+                    pass
         
         # Head/torso bob for first-person feel
         if moving:
             if not hasattr(controller, 'bob_phase'):
                 controller.bob_phase = 0.0
-            controller.bob_phase += time.dt * 9
+            bob_speed = 12 if sprinting else 9
+            controller.bob_phase += time.dt * bob_speed
             bob = math.sin(controller.bob_phase) * 0.05
             lean = math.sin(controller.bob_phase * 0.5) * 3
         else:
@@ -116,37 +208,53 @@ def update_player_animation(controller):
 
 def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0, model_path=None):
     """
-    Spawn a simple static placeholder in the world.
-    Uses a simple cube instead of the FBX to avoid animation channel issues.
+    Spawn a static tall cube model in the world that can be damaged and destroyed.
     
     Args:
-        position: World position to spawn at
-        scale: Scale of the model
+        position: World position to spawn at (will be adjusted so cube sits on ground)
+        scale: Scale multiplier for the model
         model_path: Not used (kept for compatibility)
         
     Returns:
         Entity representing the static playermodel
     """
     try:
-        # Use a simple cube instead of the FBX file to avoid animation channels
+        # Create a tall cube that reaches the POV height
+        # Adjust position so the cube sits on the ground (add half height to y)
+        cube_height = 2.4 * scale
+        adjusted_position = Vec3(position.x, position.y + cube_height / 2, position.z)
+        
         ent = Entity(
             model='cube',
-            position=position,
-            scale=scale,
-            collider="box",
+            position=adjusted_position,
+            scale=(0.3 * scale, cube_height, 0.3 * scale),  # Tall cube
+            collider="box",  # Box collider for hit detection
             color=color.gray,
+            visible=True,  # Ensure it's visible
+            enabled=True,  # Ensure it's enabled
         )
         
-        # Exclude from raycast traversal
-        _exclude_from_raycast(ent)
+        # Ensure collider is properly set up for raycast detection
+        if hasattr(ent, 'collider') and ent.collider:
+            try:
+                if hasattr(ent.collider, 'enabled'):
+                    ent.collider.enabled = True
+            except:
+                pass
+        
+        # DO NOT exclude from raycast - we want it to be hittable
+        # The entity will be treated as a player target and can take damage
+        print(f"DEBUG: Created static playermodel entity at {adjusted_position}, scale={ent.scale}, collider={ent.collider}")
         
     except Exception as e:
         print(f"Error: Could not create static playermodel: {e}")
         # Create a minimal placeholder
+        cube_height = 2.4 * scale
+        adjusted_position = Vec3(position.x, position.y + cube_height / 2, position.z)
         ent = Entity(
             model='cube',
-            position=position,
-            scale=scale,
+            position=adjusted_position,
+            scale=(0.3 * scale, cube_height, 0.3 * scale),
             collider="box",
             color=color.gray,
         )

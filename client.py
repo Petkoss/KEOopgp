@@ -18,6 +18,7 @@ import health_bar
 import respawn
 import leaderboard
 import player as player_mod
+import playermodel
 
 from server_browser import open_server_browser, get_current_browser
 
@@ -341,19 +342,28 @@ def start_game(connection_sock, player_id, username, selected_color):
     AmbientLight(color=color.rgba(100, 100, 100, 0.5))
     Sky()
 
-    # IMPORTANT: Don't create floor here - map_loader will create it
-    # This prevents duplicate floors that cause collision issues
-
-    # Load map (from server if available, otherwise local)
-    try:
-        forest_map = map_loader.load_map(server_map_path)
-        if forest_map is None:
-            print("WARNING: Map failed to load, continuing without map...")
-    except Exception as e:
-        print(f"ERROR: Failed to load map: {e}")
-        import traceback
-        traceback.print_exc()
-        print("Continuing without map...")
+    # TEMPORARILY: Replace map with a simple floor block
+    # Create a simple floor block to stand on with default texture
+    floor_block = Entity(
+        model="cube",
+        scale=(100, 1, 100),  # Much larger flat block
+        position=(0, 0, 0),  # Top of block at y=0
+        collider="box",
+        color=color.gray,  # Gray color
+        texture="white_cube",  # Default white cube texture
+    )
+    print("✓ Simple floor block created")
+    
+    # Map loading temporarily disabled
+    # try:
+    #     forest_map = map_loader.load_map(server_map_path)
+    #     if forest_map is None:
+    #         print("WARNING: Map failed to load, continuing without map...")
+    # except Exception as e:
+    #     print(f"ERROR: Failed to load map: {e}")
+    #     import traceback
+    #     traceback.print_exc()
+    #     print("Continuing without map...")
 
     # Pause menu UI
     pause_menu.setup_pause_menu()
@@ -361,10 +371,10 @@ def start_game(connection_sock, player_id, username, selected_color):
     # Leaderboard UI (fullscreen, shown when TAB is held)
     leaderboard.setup_leaderboard(my_id)
 
-    # Player – spawn well above the floor to ensure proper collision detection
-    # Floor top is at y=0, spawn player at y=10 to be safely above ground
+    # Player – spawn in the middle of the floor block
+    # Floor top is at y=0, spawn player slightly above ground at center
     player = player_mod.setup_local_player(
-        position=Vec3(0, 10, -20),
+        position=Vec3(0, 2, 0),  # Center of platform (x=0, z=0), slightly above ground (y=2)
         normal_speed=5,
         sprint_speed=10,
         jump_height=2,
@@ -384,9 +394,12 @@ def start_game(connection_sock, player_id, username, selected_color):
     #     enemy = Enemy(position=base_pos + Vec3(i * 2, 0, 0), scale=(1, 2, 1))
     #     enemies.append(enemy)
 
-    # Stále môžeme nechať statický playermodel ako dekoráciu, ale posuň ho ďalej od spawnu
-    base_pos = Vec3(5, 0, 5)
-    player_mod.spawn_static_playermodel(position=base_pos, scale=1.2)
+    # Spawn static playermodel on the floor block (taller than before)
+    # Store it globally so we can reference it
+    global static_test_player
+    base_pos = Vec3(5, 0, 5)  # Position on top of floor block (y=0 is top of block)
+    static_test_player = player_mod.spawn_static_playermodel(position=base_pos, scale=2.0)  # Made taller (was 1.2)
+    print(f"✓ Static test player stored globally: {static_test_player}")
 
 
 # ----------------------------------------------------
@@ -425,8 +438,21 @@ def on_server_selected(ip, username=None):
 # UPDATE LOOP
 # ----------------------------------------------------
 def create_remote(pid, pdata):
-    ent = Entity(model="cube", scale=1.2, color=COLOR_MAP.get(pdata["color"], color.red), collider="box")
-    ent.position = Vec3(pdata["x"], pdata["y"], pdata["z"])
+    # Create a tall cube for remote players (reaches POV height)
+    cube_height = 2.4
+    cube_scale = 1.2
+    cube_width_depth = 0.3 * cube_scale
+    cube_height_scaled = cube_height * cube_scale
+    
+    ent = Entity(
+        model="cube",
+        scale=(cube_width_depth, cube_height_scaled, cube_width_depth),
+        color=COLOR_MAP.get(pdata["color"], color.red),
+        collider="box"  # Box collider automatically matches entity scale, so hitbox matches entire cube
+    )
+    
+    # Position the cube so it sits on the ground (adjust y by half height)
+    ent.position = Vec3(pdata["x"], pdata["y"] + cube_height_scaled / 2, pdata["z"])
     # Store player_id on entity for damage identification
     ent.player_id = pid
     # Make remote players damageable
@@ -435,7 +461,7 @@ def create_remote(pid, pdata):
     ent.health = pdata.get("health", 100)
     ent.max_health = pdata.get("max_health", 100)
     label = Text(text=pdata.get("name", ""), origin=(0, 0), world_space=True, scale=1)
-    label.position = ent.position + Vec3(0, 1.2, 0)
+    label.position = ent.position + Vec3(0, cube_height_scaled / 2 + 0.2, 0)
     return {"entity": ent, "label": label}
 
 
@@ -446,8 +472,10 @@ def update_remote_players():
         if pid not in other_players:
             other_players[pid] = create_remote(pid, pdata)
         else:
-            other_players[pid]["entity"].position = Vec3(pdata["x"], pdata["y"], pdata["z"])
-            other_players[pid]["label"].position = Vec3(pdata["x"], pdata["y"] + 1.2, pdata["z"])
+            # Update position - adjust y so cube sits on ground
+            cube_height = 2.4 * 1.2  # height * scale
+            other_players[pid]["entity"].position = Vec3(pdata["x"], pdata["y"] + cube_height / 2, pdata["z"])
+            other_players[pid]["label"].position = Vec3(pdata["x"], pdata["y"] + cube_height / 2 + 0.2, pdata["z"])
             other_players[pid]["label"].text = pdata.get("name", "")
             # Update health from server
             if hasattr(other_players[pid]["entity"], "health"):

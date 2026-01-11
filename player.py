@@ -44,7 +44,7 @@ def apply_player_damage(target, amount):
 
 def create_player(position=Vec3(0, 3, -2), speed=5, jump_height=2):
     """
-    Create and configure the local player controller with soldier character model.
+    Create and configure the local player controller with tall cube model.
     """
     controller = FirstPersonController(
         speed=speed,
@@ -52,7 +52,11 @@ def create_player(position=Vec3(0, 3, -2), speed=5, jump_height=2):
         position=position,
         collider="box",
     )
-    controller.scale_y = DEFAULT_HEIGHT
+    # Set scale to match cube dimensions: width/depth 0.3, height 2.4
+    controller.scale_x = 0.3
+    controller.scale_y = DEFAULT_HEIGHT  # 2.4
+    controller.scale_z = 0.3
+    
     # Ensure collider is properly set up and enabled for physics
     if controller.collider is None:
         controller.collider = "box"
@@ -61,15 +65,12 @@ def create_player(position=Vec3(0, 3, -2), speed=5, jump_height=2):
     try:
         if hasattr(controller.collider, 'enabled'):
             controller.collider.enabled = True
-        # Verify collider exists and is the right type
-        if controller.collider is not None:
-            # FirstPersonController automatically handles collider sizing based on scale_y
-            # The collider should be a BoxCollider that matches the player's dimensions
-            pass
+        # The collider will automatically match the entity's scale (0.3 x 2.4 x 0.3)
+        # This ensures the hitbox matches the entire cube
     except Exception as e:
         print(f"Warning: Could not fully configure player collider: {e}")
     
-    print(f"✓ Player created at {position}, collider={type(controller.collider).__name__ if controller.collider else 'None'}, scale_y={controller.scale_y}")
+    print(f"✓ Player created at {position}, collider={type(controller.collider).__name__ if controller.collider else 'None'}, scale=({controller.scale_x}, {controller.scale_y}, {controller.scale_z})")
 
     # Give the controller baseline health so it can receive player-vs-player damage
     _attach_health(controller)
@@ -130,9 +131,25 @@ def update_local_player(controller):
 
 def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0):
     """
-    Spawn a non-moving soldier character model in the world (for showcase/testing).
+    Spawn a non-moving tall cube model in the world that can be damaged and destroyed.
     """
     ent = playermodel.spawn_static_playermodel(position=position, scale=scale)
-    _attach_health(ent)
+    
+    # Define death callback to make entity disappear when health reaches 0
+    def on_death():
+        """Destroy the entity when it dies."""
+        if ent and hasattr(ent, 'enabled'):
+            destroy(ent)
+            print("Static playermodel destroyed!")
+    
+    # Attach health with death callback
+    _attach_health(ent, on_death=on_death)
+    
+    # Debug: verify the entity is set up correctly
+    print(f"✓ Static playermodel spawned at {position}, scale={scale}")
+    print(f"  - is_player_target: {getattr(ent, 'is_player_target', False)}")
+    print(f"  - health: {getattr(ent, 'health', 'N/A')}")
+    print(f"  - collider: {getattr(ent, 'collider', 'N/A')}")
+    
     return ent
 

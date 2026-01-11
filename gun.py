@@ -146,16 +146,38 @@ def shoot():
     do_recoil()
     do_muzzle_flash()
     
-    # Build ignore list - include player, gun, and playermodel if it exists
+    # Build ignore list - include player, gun, playermodel, and floor block
     ignore = [player, gun] if gun else [player]
     if player and hasattr(player, 'playermodel') and player.playermodel:
         if player.playermodel not in ignore:
             ignore.append(player.playermodel)
     
-    hit_info = raycast(camera.world_position, camera.forward, distance=50, ignore=ignore)
+    # Add floor block to ignore list so we can shoot through it to hit other entities
+    try:
+        from ursina import scene
+        for ent in scene.entities:
+            if hasattr(ent, 'model') and ent.model == 'cube' and hasattr(ent, 'scale'):
+                # Check if it's the floor block (large flat cube)
+                if ent.scale[1] == 1 and ent.scale[0] > 50 and ent.scale[2] > 50:
+                    if ent not in ignore:
+                        ignore.append(ent)
+                    break
+    except:
+        pass
+    
+    hit_info = raycast(camera.world_position, camera.forward, distance=100, ignore=ignore)  # Increased distance
     
     if hit_info.hit:
         target = hit_info.entity
+        print(f"DEBUG: Hit entity!")
+        print(f"  - model: {getattr(target, 'model', 'N/A')}")
+        print(f"  - position: {getattr(target, 'position', 'N/A')}")
+        print(f"  - is_player_target: {getattr(target, 'is_player_target', False)}")
+        print(f"  - has player_id: {hasattr(target, 'player_id')}")
+        print(f"  - health: {getattr(target, 'health', 'N/A')}")
+        print(f"  - enabled: {getattr(target, 'enabled', 'N/A')}")
+        print(f"  - visible: {getattr(target, 'visible', 'N/A')}")
+        
         if isinstance(target, Enemy):
             target.take_damage(20)
         elif getattr(target, "is_player_target", False):
@@ -171,13 +193,32 @@ def shoot():
                             "amount": 20
                         }
                         client.sock.sendall(json.dumps(damage_msg).encode())
+                        print(f"Sent damage to remote player {target.player_id}")
                 except:
                     pass  # Server communication failed
             else:
                 # Local player target (like static test models) - apply damage locally
-                player_mod.apply_player_damage(target, 20)
+                print(f"Attempting to apply damage to local player target...")
+                old_health = getattr(target, 'health', 0)
+                damage_applied = player_mod.apply_player_damage(target, 20)
+                new_health = getattr(target, 'health', 0)
+                if damage_applied:
+                    print(f"✓ Damage applied! Health: {old_health} -> {new_health}/{getattr(target, 'max_health', 'N/A')}")
+                    if new_health <= 0:
+                        print(f"✓ Entity should be destroyed now!")
+                else:
+                    print(f"✗ Damage NOT applied - apply_player_damage returned False")
+                    print(f"  - is_player_target check: {getattr(target, 'is_player_target', False)}")
         else:
+            # Debug: print what we hit if it's not a recognized target
+            if hasattr(target, 'model'):
+                print(f"Hit non-target entity: {target.model}, is_player_target={getattr(target, 'is_player_target', False)}")
             create_bullet_hole(hit_info)
+    else:
+        print("DEBUG: Raycast did not hit anything")
+        print(f"  - Raycast from: {camera.world_position}")
+        print(f"  - Raycast direction: {camera.forward}")
+        print(f"  - Ignore list length: {len(ignore)}")
 
 def shooting_loop():
     if shooting and mouse.left and not reloading:
