@@ -197,18 +197,38 @@ def shoot():
         if isinstance(target, Enemy):
             target.take_damage(damage_amount)
         elif hasattr(target, "player_id"):
-            # Remote player - send damage to server
+            # Player-vs-player hit handled fully on the client
+            previous_health = getattr(target, "health", 100)
+            if not hasattr(target, "health"):
+                player_mod._attach_health(target, max_health=100)
+                previous_health = getattr(target, "health", 100)
+
+            # Apply damage locally
+            target.health = max(0, previous_health - damage_amount)
+            target_pid = str(target.player_id)
+
+            # Identify attacker (prefer player.player_id, fall back to local tag)
+            attacker_pid = None
             try:
-                import client
-                if client.sock and client.my_id:
-                    damage_msg = {
-                        "type": "damage",
-                        "target_id": str(target.player_id),
-                        "amount": damage_amount
-                    }
-                    client.sock.sendall(json.dumps(damage_msg).encode())
-            except:
-                pass
+                attacker_pid = str(getattr(player, "player_id"))
+            except Exception:
+                attacker_pid = None
+            if not attacker_pid:
+                attacker_pid = "local_player"
+
+            # Award kill when health crosses zero
+            if previous_health > 0 and target.health <= 0 and attacker_pid != target_pid:
+                try:
+                    import leaderboard
+                    # Use leaderboard's existing data store if present
+                    kills_map = getattr(leaderboard, "server_players_data", {}) or {}
+                    if attacker_pid not in kills_map:
+                        kills_map[attacker_pid] = {"name": f"Player{attacker_pid}", "kills": 0}
+                    current_kills = int(kills_map[attacker_pid].get("kills", 0) or 0)
+                    kills_map[attacker_pid]["kills"] = current_kills + 1
+                    leaderboard.update_leaderboard_data(kills_map)
+                except Exception:
+                    pass
         else:
             # Local target (static cubes, etc.) - apply damage directly
             # Ensure it's a player target and has health

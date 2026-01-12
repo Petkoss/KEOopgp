@@ -342,28 +342,18 @@ def start_game(connection_sock, player_id, username, selected_color):
     AmbientLight(color=color.rgba(100, 100, 100, 0.5))
     Sky()
 
-    # TEMPORARILY: Replace map with a simple floor block
-    # Create a simple floor block to stand on with default texture
-    floor_block = Entity(
-        model="cube",
-        scale=(100, 1, 100),  # Much larger flat block
-        position=(0, 0, 0),  # Top of block at y=0
-        collider="box",
-        color=color.gray,  # Gray color
-        texture="white_cube",  # Default white cube texture
-    )
-    print("✓ Simple floor block created")
-    
-    # Map loading temporarily disabled
-    # try:
-    #     forest_map = map_loader.load_map(server_map_path)
-    #     if forest_map is None:
-    #         print("WARNING: Map failed to load, continuing without map...")
-    # except Exception as e:
-    #     print(f"ERROR: Failed to load map: {e}")
-    #     import traceback
-    #     traceback.print_exc()
-    #     print("Continuing without map...")
+    # Load map using map_loader (use server's map if available, otherwise use default shooting_game_environment_map_tdm.glb)
+    try:
+        # Use server's map if available, otherwise use default
+        map_path = server_map_path if server_map_path and os.path.exists(server_map_path) else None
+        forest_map = map_loader.load_map(map_path)
+        if forest_map is None:
+            print("WARNING: Map failed to load, continuing without map...")
+    except Exception as e:
+        print(f"ERROR: Failed to load map: {e}")
+        import traceback
+        traceback.print_exc()
+        print("Continuing without map...")
 
     # Pause menu UI
     pause_menu.setup_pause_menu()
