@@ -187,6 +187,14 @@ class ServerBrowser(Entity):
 
         threading.Thread(target=self._scan, daemon=True).start()
 
+    def update(self):
+        """Update method to fix TextField _active attribute issue."""
+        try:
+            if hasattr(self, 'name_input') and self.name_input:
+                fix_inputfield_textfield(self.name_input)
+        except:
+            pass
+
     # Scan LAN servers
     def _scan(self):
         if self._scanning:

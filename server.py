@@ -11,6 +11,7 @@ clients = {}        # player_id -> {"conn": conn, "addr": addr}
 players = {}        # player_id -> {"x":..., "y":..., "z":..., "name":..., "color":..., "health":...}
 health = {}         # player_id -> current health value
 MAX_HEALTH = 100
+respawn_timers = {} # player_id -> timestamp when player should respawn
 next_id = 0
 map_data = None     # Raw map bytes (loaded once on server start)
 map_filename = None # Map filename
@@ -73,6 +74,7 @@ def broadcast_players():
             if r in clients: del clients[r]
             if r in players: del players[r]
             if r in health: del health[r]
+            if r in respawn_timers: del respawn_timers[r]
             killtrack.remove_player(r)  # Clean up kill tracking
 
 def load_map_file():
@@ -196,30 +198,28 @@ def handle_client(conn, addr):
                     damage_amount = float(d.get("amount", 0))
                     attacker_id = player_id
                     
-                    print(f"DEBUG: Damage received - target_id={target_id}, amount={damage_amount}, attacker_id={attacker_id}")
-                    
                     # Validate: can't damage yourself, target must exist, attacker must exist
                     if (target_id and target_id != attacker_id and 
                         target_id in players and target_id in health and
                         attacker_id in players):
-                        old_health = health[target_id]
-                        # Apply damage
-                        health[target_id] = max(0, health[target_id] - damage_amount)
-                        new_health = health[target_id]
-                        
-                        print(f"DEBUG: Damage applied - target {target_id}: {old_health} -> {new_health} (damage: {damage_amount})")
-                        
-                        # Award kill to attacker if target dies
-                        if health[target_id] <= 0 and target_id in health:
-                            print(f"DEBUG: Target {target_id} died, awarding kill to {attacker_id}")
-                            killtrack.award_kill(attacker_id, target_id)
-                            # Reset target health after death (respawn)
-                            health[target_id] = MAX_HEALTH
-                        
-                        # Damage events should broadcast immediately
-                        should_broadcast = True
-                    else:
-                        print(f"DEBUG: Damage validation failed - target_id={target_id}, attacker_id={attacker_id}, target_exists={target_id in players if target_id else False}, attacker_exists={attacker_id in players}")
+                        # If target is already pending respawn, ignore further damage
+                        if target_id in respawn_timers:
+                            pass
+                        else:
+                            # Apply damage
+                            health[target_id] = max(0, health[target_id] - damage_amount)
+                            
+                            # Award kill to attacker if target dies
+                            if health[target_id] <= 0 and target_id in health:
+                                killtrack.award_kill(attacker_id, target_id)
+                                # Mark for respawn after delay
+                                respawn_timers[target_id] = time.time() + 10.0
+                                # Keep health at 0 until respawn; optionally reset position
+                                if target_id in players:
+                                    players[target_id].update({"x": 0, "y": 0, "z": 0})
+                            
+                            # Damage events should broadcast immediately
+                            should_broadcast = True
             
             # Broadcast if needed
             if should_broadcast:
@@ -243,6 +243,20 @@ def periodic_broadcast_loop():
     while True:
         try:
             current_time = time.time()
+            
+            # Handle pending respawns
+            respawned = False
+            with LOCK:
+                for pid, ts in list(respawn_timers.items()):
+                    if current_time >= ts:
+                        # Respawn player with full health
+                        health[pid] = MAX_HEALTH
+                        # Reset position to spawn (0,0,0); clients add offsets as needed
+                        if pid in players:
+                            players[pid].update({"x": 0, "y": 0, "z": 0})
+                        del respawn_timers[pid]
+                        respawned = True
+            
             # Broadcast every 500ms if there are clients connected
             # broadcast_players() has its own lock, so no need to lock here
             if current_time - last_periodic_broadcast >= periodic_broadcast_interval:
@@ -251,6 +265,9 @@ def periodic_broadcast_loop():
                 if has_clients:  # Only broadcast if there are connected clients
                     broadcast_players()
                 last_periodic_broadcast = current_time
+            elif respawned:
+                # If someone respawned, push an immediate broadcast so clients see it
+                broadcast_players()
             time.sleep(0.1)  # Check every 100ms
         except:
             time.sleep(0.5)

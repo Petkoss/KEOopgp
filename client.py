@@ -462,6 +462,15 @@ def create_remote(pid, pdata):
     ent.max_health = pdata.get("max_health", 100)
     label = Text(text=pdata.get("name", ""), origin=(0, 0), world_space=True, scale=1)
     label.position = ent.position + Vec3(0, cube_height_scaled / 2 + 0.2, 0)
+    # Disable Text label from raycast detection - it should not block hits
+    try:
+        if hasattr(label, 'collider'):
+            label.collider = None
+        if hasattr(label, 'nodePath') and label.nodePath:
+            label.nodePath.setCollideMask(0)
+    except:
+        pass
+    
     return {"entity": ent, "label": label}
 
 
@@ -481,6 +490,11 @@ def update_remote_players():
             if hasattr(other_players[pid]["entity"], "health"):
                 other_players[pid]["entity"].health = pdata.get("health", 100)
                 other_players[pid]["entity"].max_health = pdata.get("max_health", 100)
+            
+            # Show/hide entity based on health (dead players disappear)
+            is_dead = pdata.get("health", 100) <= 0
+            other_players[pid]["entity"].enabled = not is_dead
+            other_players[pid]["label"].enabled = not is_dead
     for pid in list(other_players.keys()):
         if pid not in server_players:
             destroy(other_players[pid]["entity"])
@@ -517,9 +531,15 @@ def update():
             server_health = server_players[my_id].get("health", 100)
             if hasattr(player, "health") and abs(player.health - server_health) > 0.1:
                 player.health = server_health
-                if health_bar.player_health != server_health:
-                    health_bar.player_health = server_health
-                    health_bar.update_health_bar()
+            if health_bar.player_health != server_health:
+                health_bar.player_health = server_health
+                health_bar.update_health_bar()
+            
+            # Death/respawn handling based on server health
+            if server_health <= 0 and not respawn.get_is_dead():
+                respawn.die()
+            elif server_health > 0 and respawn.get_is_dead():
+                respawn.respawn()
 
         # Enemies sú vypnuté, takže netreba ich updateovať
         # for enemy in enemies[:]:

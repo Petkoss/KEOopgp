@@ -146,11 +146,33 @@ def shoot():
     do_recoil()
     do_muzzle_flash()
     
-    # Build ignore list - include player, gun, playermodel, and floor block
+    # Build ignore list - include player, gun, playermodel, floor block, and remote player labels
     ignore = [player, gun] if gun else [player]
     if player and hasattr(player, 'playermodel') and player.playermodel:
         if player.playermodel not in ignore:
             ignore.append(player.playermodel)
+    
+    # Add remote player labels to ignore list - we want to hit entities, not text labels
+    try:
+        import client
+        if hasattr(client, 'other_players'):
+            for pid, player_data in client.other_players.items():
+                if isinstance(player_data, dict) and 'label' in player_data:
+                    label = player_data['label']
+                    if label and label not in ignore:
+                        ignore.append(label)
+    except:
+        pass
+    
+    # Add all Text entities (labels) to ignore list as backup
+    try:
+        from ursina import scene
+        for ent in scene.entities:
+            if isinstance(ent, Text):
+                if ent not in ignore:
+                    ignore.append(ent)
+    except:
+        pass
     
     # Add floor block to ignore list so we can shoot through it to hit other entities
     try:

@@ -107,4 +107,15 @@ def update_health_bar():
     # Update text
     health_text.text = f"{int(player_health)}/{max_health}"
 
+def set_health_bar_visible(visible):
+    """Show or hide health bar UI elements"""
+    global health_bar_bg, health_bar_fill, health_text
+    
+    if health_bar_bg:
+        health_bar_bg.enabled = visible
+    if health_bar_fill:
+        health_bar_fill.enabled = visible
+    if health_text:
+        health_text.enabled = visible
+
 
