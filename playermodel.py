@@ -38,40 +38,52 @@ def _exclude_from_raycast(entity, controller=None):
 
 def attach_playermodel_to_controller(controller, model_path=None):
     """
-    Attach a tall cube model to a FirstPersonController (reaches POV).
+    Attach a player model (GLB) to a FirstPersonController.
     
     Args:
         controller: The FirstPersonController to attach the model to
-        model_path: Not used (kept for compatibility)
+        model_path: Optional path to model file (defaults to john_wick_fortnite.glb)
         
     Returns:
         True if model was successfully attached, False otherwise
     """
     try:
-        # Create a tall cube that reaches the POV
-        # The cube is scaled to match the player height (scale_y = 2.4)
-        # Position it so it extends from the ground to the camera height
+        # Use the specified model path or default to john_wick_fortnite.glb
+        if model_path is None:
+            model_path = 'assets/john_wick_fortnite.glb'
+        
+        # Load the GLB model
         controller.playermodel = Entity(
             parent=controller,
-            model='cube',
-            scale=(0.3, 2.4, 0.3),  # Tall cube: width/depth 0.3, height 2.4 to match player height
-            y=1.2,  # Center the cube vertically (half of 2.4)
+            model=model_path,
+            scale=(0.75, 3, 0.75),  # 5x taller than default
+            y=DEFAULT_Y_OFFSET,  # Position at default offset
             visible=False,  # Hidden for first-person view
         )
         
         # Exclude from raycast traversal - CRITICAL to prevent raycast errors
         _exclude_from_raycast(controller.playermodel, controller)
         
-        # No animations needed for cube
-        controller._playermodel_animations_disabled = True
-        controller._has_animations = False
+        # Check if model has animations
+        has_animations = False
+        try:
+            if hasattr(controller.playermodel, 'model') and controller.playermodel.model:
+                if hasattr(controller.playermodel.model, 'animations'):
+                    anims = controller.playermodel.model.animations
+                    if anims and (isinstance(anims, dict) or (isinstance(anims, list) and len(anims) > 0)):
+                        has_animations = True
+        except:
+            pass
         
-        print("✓ Tall cube playermodel attached")
+        controller._has_animations = has_animations
+        controller._playermodel_animations_disabled = not has_animations  # Disable if no animations found
+        
+        print(f"✓ Player model '{model_path}' attached (animations: {has_animations})")
         
         return True
         
     except Exception as e:
-        print(f"Warning: Could not create playermodel: {e}")
+        print(f"Warning: Could not load playermodel '{model_path}': {e}")
         # Fallback to cube placeholder
         try:
             controller.playermodel = Entity(
@@ -82,10 +94,12 @@ def attach_playermodel_to_controller(controller, model_path=None):
                 visible=False,
             )
             _exclude_from_raycast(controller.playermodel, controller)
+            print("✓ Fallback cube playermodel attached")
         except:
             pass
         controller.playermodel = None
         controller._playermodel_animations_disabled = True
+        controller._has_animations = False
         return False
 
 
@@ -208,28 +222,27 @@ def update_player_animation(controller):
 
 def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0, model_path=None):
     """
-    Spawn a static tall cube model in the world that can be damaged and destroyed.
+    Spawn a static player model (GLB) in the world that can be damaged and destroyed.
     
     Args:
-        position: World position to spawn at (will be adjusted so cube sits on ground)
+        position: World position to spawn at
         scale: Scale multiplier for the model
-        model_path: Not used (kept for compatibility)
+        model_path: Optional path to model file (defaults to john_wick_fortnite.glb)
         
     Returns:
         Entity representing the static playermodel
     """
     try:
-        # Create a tall cube that reaches the POV height
-        # Adjust position so the cube sits on the ground (add half height to y)
-        cube_height = 2.4 * scale
-        adjusted_position = Vec3(position.x, position.y + cube_height / 2, position.z)
+        # Use the specified model path or default to john_wick_fortnite.glb
+        if model_path is None:
+            model_path = 'assets/john_wick_fortnite.glb'
         
+        # Load the GLB model
         ent = Entity(
-            model='cube',
-            position=adjusted_position,
-            scale=(0.3 * scale, cube_height, 0.3 * scale),  # Tall cube
+            model=model_path,
+            position=position,
+            scale=(scale, scale * 5, scale),  # 5x taller than default
             collider="box",  # Box collider for hit detection
-            color=color.white,  # White cube for visibility
             visible=True,  # Ensure it's visible
             enabled=True,  # Ensure it's enabled
         )
@@ -250,15 +263,19 @@ def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0, model_path=None)
         
     except Exception as e:
         print(f"Error: Could not create static playermodel: {e}")
-        # Create a minimal placeholder
-        cube_height = 2.4 * scale
-        adjusted_position = Vec3(position.x, position.y + cube_height / 2, position.z)
-        ent = Entity(
-            model='cube',
-            position=adjusted_position,
-            scale=(0.3 * scale, cube_height, 0.3 * scale),
-            collider="box",
-            color=color.white,  # White cube for visibility
-        )
+        # Fallback to cube placeholder
+        try:
+            cube_height = 2.4 * scale
+            adjusted_position = Vec3(position.x, position.y + cube_height / 2, position.z)
+            ent = Entity(
+                model='cube',
+                position=adjusted_position,
+                scale=(0.3 * scale, cube_height, 0.3 * scale),
+                collider="box",
+                color=color.white,  # White cube for visibility
+            )
+            ent.is_player_target = True
+        except:
+            ent = None
     
     return ent

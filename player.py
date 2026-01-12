@@ -42,7 +42,7 @@ def apply_player_damage(target, amount):
     return True
 
 
-def create_player(position=Vec3(0, 3, -2), speed=5, jump_height=2):
+def create_player(position=Vec3(0, 3, -2), speed=1, jump_height=1.5):
     """
     Create and configure the local player controller with tall cube model.
     """
@@ -70,6 +70,16 @@ def create_player(position=Vec3(0, 3, -2), speed=5, jump_height=2):
     except Exception as e:
         print(f"Warning: Could not fully configure player collider: {e}")
     
+    # Ensure the controller can move properly - disable collision with certain entities if needed
+    try:
+        # Make sure gravity and movement are enabled
+        if hasattr(controller, 'gravity'):
+            controller.gravity = 1
+        if hasattr(controller, 'jump_height'):
+            controller.jump_height = jump_height
+    except Exception as e:
+        print(f"Warning: Could not configure controller movement: {e}")
+    
     print(f"✓ Player created at {position}, collider={type(controller.collider).__name__ if controller.collider else 'None'}, scale=({controller.scale_x}, {controller.scale_y}, {controller.scale_z})")
 
     # Give the controller baseline health so it can receive player-vs-player damage
@@ -87,7 +97,7 @@ def create_player(position=Vec3(0, 3, -2), speed=5, jump_height=2):
     return controller
 
 
-def setup_local_player(position=Vec3(0, 2, -2), normal_speed=5, sprint_speed=10, jump_height=2):
+def setup_local_player(position=Vec3(0, 2, -2), normal_speed=1, sprint_speed=4, jump_height=1.5):
     """
     Factory that creates the player and handles mouse locking defaults.
     """

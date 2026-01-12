@@ -363,12 +363,23 @@ def start_game(connection_sock, player_id, username, selected_color):
 
     # Player – spawn in the middle of the floor block
     # Floor top is at y=0, spawn player slightly above ground at center
+    # Ensure mouse is locked before creating player controller
+    mouse.locked = True
+    mouse.visible = False
     player = player_mod.setup_local_player(
-        position=Vec3(0, 2, 0),  # Center of platform (x=0, z=0), slightly above ground (y=2)
+        position=Vec3(0, 10, 0),  # Spawn higher to avoid getting stuck in geometry (y=10)
         normal_speed=5,
         sprint_speed=10,
         jump_height=2,
     )
+    # Ensure player controller is enabled and properly initialized
+    if hasattr(player, 'enabled'):
+        player.enabled = True
+    # Ensure speed is set correctly
+    if hasattr(player, 'speed'):
+        player.speed = player.normal_speed
+    # Set player reference for respawn system
+    respawn.set_player(player)
 
     # Health bar
     health_bar.setup_health_bar(player)
@@ -512,6 +523,10 @@ def update():
     if not game_started or player is None:
         return
     if not pause_menu.paused:
+        # Ensure mouse is locked for FirstPersonController to work
+        if not mouse.locked:
+            mouse.locked = True
+            mouse.visible = False
         send_position()
         player_mod.update_local_player(player)
         

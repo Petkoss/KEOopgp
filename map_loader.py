@@ -41,7 +41,7 @@ def load_map(map_path: str = None):
     if map_path is None:
         # Get the directory where this script is located
         script_dir = Path(__file__).parent
-        map_path = script_dir / "assets" / "map" / "dankomapa.glb"
+        map_path = script_dir / "assets" / "map" / "dankomapa3.glb"
     
     map_path = Path(map_path)
 
@@ -59,10 +59,20 @@ def load_map(map_path: str = None):
             model=model,
             scale=1,
             position=(0, 0, 0),
-            collider="mesh",
+            collider="box",  # Enable mesh collider for solid buildings
             double_sided=False,
             color=color.white,
         )
+        
+        # Configure the mesh collider to work better with FirstPersonController
+        try:
+            if hasattr(forest_map.collider, 'enabled'):
+                forest_map.collider.enabled = True
+            # Try to make the collider less likely to trap the player
+            if hasattr(forest_map.collider, 'thickness'):
+                forest_map.collider.thickness = 0.1  # Add some thickness to prevent getting stuck
+        except Exception as e:
+            print(f"Note: Could not configure map collider: {e}")
 
         # --- FORCE OPAQUE MATERIALS ----------------------------------------
         try:
