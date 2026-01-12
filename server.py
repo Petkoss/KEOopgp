@@ -79,8 +79,8 @@ def load_map_file():
     """Load the bundled GLB map as raw bytes. Returns (data, filename) or (None, None)."""
     global map_data, map_filename
     map_paths = [
-        "assets/map/maleakozeke.glb",
-        "map/maleakozeke.glb",
+        "assets/map/dankomapa.glb",
+        "map/dankomapa.glb",
     ]
 
     for path in map_paths:
@@ -100,45 +100,41 @@ def load_map_file():
 
 def send_map_to_client(conn):
     """Send map file data to client using raw binary."""
-    # TEMPORARILY: Always send empty map message (no map)
-    conn.sendall(json.dumps({"type": "map_info", "filename": None, "size": 0}).encode())
-    
-    # Original map loading code (temporarily disabled):
-    # global map_data, map_filename
-    # if map_data and map_filename:
-    #     # Send map info (filename and raw byte size)
-    #     info_msg = json.dumps(
-    #         {
-    #             "type": "map_info",
-    #             "filename": map_filename,
-    #             "size": len(map_data),
-    #         }
-    #     ).encode()
-    #     conn.sendall(info_msg)
-    #
-    #     # Wait for client signal: "OK" to download, "SKIP" to reuse cached copy
-    #     try:
-    #         signal = conn.recv(4)
-    #     except Exception:
-    #         signal = b""
-    #
-    #     if signal.startswith(b"SKIP"):
-    #         print("Client requested to skip map download (using cached copy).")
-    #         return
-    #
-    #     # Default behaviour: send raw bytes
-    #     chunk_size = 8192
-    #     total = len(map_data)
-    #     sent = 0
-    #     while sent < total:
-    #         end = min(sent + chunk_size, total)
-    #         conn.sendall(map_data[sent:end])
-    #         sent = end
-    #
-    #     print(f"Sent map file {map_filename} to client ({total} bytes)")
-    # else:
-    #     # Send empty map message (no map on server)
-    #     conn.sendall(json.dumps({"type": "map_info", "filename": None, "size": 0}).encode())
+    global map_data, map_filename
+    if map_data and map_filename:
+        # Send map info (filename and raw byte size)
+        info_msg = json.dumps(
+            {
+                "type": "map_info",
+                "filename": map_filename,
+                "size": len(map_data),
+            }
+        ).encode()
+        conn.sendall(info_msg)
+
+        # Wait for client signal: "OK" to download, "SKIP" to reuse cached copy
+        try:
+            signal = conn.recv(4)
+        except Exception:
+            signal = b""
+
+        if signal.startswith(b"SKIP"):
+            print("Client requested to skip map download (using cached copy).")
+            return
+
+        # Default behaviour: send raw bytes
+        chunk_size = 8192
+        total = len(map_data)
+        sent = 0
+        while sent < total:
+            end = min(sent + chunk_size, total)
+            conn.sendall(map_data[sent:end])
+            sent = end
+
+        print(f"Sent map file {map_filename} to client ({total} bytes)")
+    else:
+        # Send empty map message (no map on server)
+        conn.sendall(json.dumps({"type": "map_info", "filename": None, "size": 0}).encode())
 
 def handle_client(conn, addr):
     global next_id
@@ -256,8 +252,7 @@ def periodic_broadcast_loop():
             time.sleep(0.5)
 
 def start_server(port=9999):
-    # TEMPORARILY: Map loading disabled
-    # load_map_file()  # Load map on server start
+    load_map_file()  # Load map on server start
     
     # Start periodic broadcast thread to keep leaderboard data fresh
     threading.Thread(target=periodic_broadcast_loop, daemon=True).start()
