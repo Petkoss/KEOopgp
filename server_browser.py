@@ -14,9 +14,12 @@ def fix_inputfield_textfield(input_field):
         try:
             if hasattr(input_field, 'text_field') and input_field.text_field:
                 tf = input_field.text_field
-                if not hasattr(tf, '_active'):
-                    tf._active = False
-        except:
+                # Always use object.__setattr__ to avoid triggering property getter/setter
+                try:
+                    object.__setattr__(tf, '_active', False)
+                except (AttributeError, KeyError):
+                    pass
+        except (AttributeError, KeyError):
             pass
     
     # Apply fix immediately
@@ -294,11 +297,12 @@ class ServerBrowser(Entity):
                 # Fix TextField _active attribute before destroying to prevent crashes
                 if hasattr(self.name_input, 'text_field') and self.name_input.text_field:
                     tf = self.name_input.text_field
-                    # Ensure _active attribute exists and is False
-                    if not hasattr(tf, '_active'):
-                        tf._active = False
-                    else:
-                        tf._active = False
+                    # Ensure _active attribute exists and is False (use safe method)
+                    try:
+                        # Always use object.__setattr__ to avoid triggering property getter/setter
+                        object.__setattr__(tf, '_active', False)
+                    except (AttributeError, KeyError):
+                        pass
                     # Disable TextField
                     tf.enabled = False
                     # Try to remove from scene's update list if possible
@@ -338,23 +342,24 @@ class ServerBrowser(Entity):
         for ent in list(self._ui_elems):
             try:
                 ent.enabled = False
-                # If it's an InputField, clean up its TextField
+                    # If it's an InputField, clean up its TextField
                 if hasattr(ent, '__class__') and 'InputField' in str(type(ent)):
                     if hasattr(ent, 'text_field') and ent.text_field:
                         tf = ent.text_field
-                        # Ensure _active attribute exists and is False
-                        if not hasattr(tf, '_active'):
-                            tf._active = False
-                        else:
-                            tf._active = False
+                            # Ensure _active attribute exists and is False (use safe method)
+                        try:
+                                # Always use object.__setattr__ to avoid triggering property getter/setter
+                            object.__setattr__(tf, '_active', False)
+                        except (AttributeError, KeyError):
+                            pass
                         tf.enabled = False
                         # Try to remove from scene's update list
-                        try:
-                            from ursina import scene
-                            if hasattr(scene, 'entities') and tf in scene.entities:
-                                scene.entities.remove(tf)
-                        except:
-                            pass
+                    try:
+                        from ursina import scene
+                        if hasattr(scene, 'entities') and tf in scene.entities:
+                            scene.entities.remove(tf)
+                    except:
+                        pass
                     # Try to remove InputField from scene's update list
                     try:
                         from ursina import scene

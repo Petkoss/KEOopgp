@@ -1,7 +1,6 @@
 from ursina import *
 from enemy import Enemy
 import player as player_mod
-import crosshair
 import gun_effects
 import json
 
@@ -197,38 +196,38 @@ def shoot():
         if isinstance(target, Enemy):
             target.take_damage(damage_amount)
         elif hasattr(target, "player_id"):
-            # Player-vs-player hit handled fully on the client
+            # Player-vs-player hit - send damage to server for authoritative handling
             previous_health = getattr(target, "health", 100)
             if not hasattr(target, "health"):
                 player_mod._attach_health(target, max_health=100)
                 previous_health = getattr(target, "health", 100)
 
-            # Apply damage locally
-            target.health = max(0, previous_health - damage_amount)
             target_pid = str(target.player_id)
 
-            # Identify attacker (prefer player.player_id, fall back to local tag)
+            # Identify attacker (get from client module)
             attacker_pid = None
             try:
-                attacker_pid = str(getattr(player, "player_id"))
+                import client
+                attacker_pid = str(client.my_id) if client.my_id else None
             except Exception:
-                attacker_pid = None
-            if not attacker_pid:
-                attacker_pid = "local_player"
-
-            # Award kill when health crosses zero
-            if previous_health > 0 and target.health <= 0 and attacker_pid != target_pid:
+                pass
+            
+            # Send damage message to server if we have valid IDs
+            if attacker_pid and target_pid and attacker_pid != target_pid:
                 try:
-                    import leaderboard
-                    # Use leaderboard's existing data store if present
-                    kills_map = getattr(leaderboard, "server_players_data", {}) or {}
-                    if attacker_pid not in kills_map:
-                        kills_map[attacker_pid] = {"name": f"Player{attacker_pid}", "kills": 0}
-                    current_kills = int(kills_map[attacker_pid].get("kills", 0) or 0)
-                    kills_map[attacker_pid]["kills"] = current_kills + 1
-                    leaderboard.update_leaderboard_data(kills_map)
-                except Exception:
-                    pass
+                    import client
+                    if client.sock:
+                        damage_msg = {
+                            "type": "damage",
+                            "target_id": target_pid,
+                            "amount": damage_amount
+                        }
+                        client.sock.sendall(json.dumps(damage_msg).encode())
+                except Exception as e:
+                    print(f"Failed to send damage to server: {e}")
+            
+            # Apply damage locally for immediate feedback (server will sync authoritative health)
+            target.health = max(0, previous_health - damage_amount)
         else:
             # Local target (static cubes, etc.) - apply damage directly
             # Ensure it's a player target and has health

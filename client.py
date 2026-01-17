@@ -9,7 +9,6 @@ from ursina.prefabs.first_person_controller import FirstPersonController
 import socket, json, threading, time, random
 import os
 import tempfile
-
 import pause_menu
 import map_loader
 import gun
@@ -212,9 +211,13 @@ def start_game(connection_sock, player_id, username, selected_color):
                         ent.enabled = False
                         if hasattr(ent, 'text_field') and ent.text_field:
                             tf = ent.text_field
-                            if not hasattr(tf, '_active'):
-                                tf._active = False
-                            tf.enabled = False
+                            # Safely initialize _active attribute without triggering property getter
+                            try:
+                                # Always use object.__setattr__ to avoid triggering property getter/setter
+                                object.__setattr__(tf, '_active', False)
+                                tf.enabled = False
+                            except (AttributeError, KeyError):
+                                pass
                 except:
                     pass
     except:
@@ -231,9 +234,15 @@ def start_game(connection_sock, player_id, username, selected_color):
                     browser.name_input.enabled = False
                     if hasattr(browser.name_input, 'text_field') and browser.name_input.text_field:
                         tf = browser.name_input.text_field
-                        if not hasattr(tf, '_active'):
-                            tf._active = False
-                        tf.enabled = False
+                        # Safely initialize _active attribute without triggering property getter
+                        try:
+                            if not hasattr(tf, '__dict__') or '_active' not in tf.__dict__:
+                                object.__setattr__(tf, '_active', False)
+                            else:
+                                tf._active = False
+                            tf.enabled = False
+                        except (AttributeError, KeyError):
+                            pass
                     # Remove from scene before destroying
                     if hasattr(browser.name_input, 'remove_node'):
                         browser.name_input.remove_node()
@@ -251,9 +260,15 @@ def start_game(connection_sock, player_id, username, selected_color):
                             ent.enabled = False
                             if hasattr(ent, 'text_field') and ent.text_field:
                                 tf = ent.text_field
-                                if not hasattr(tf, '_active'):
-                                    tf._active = False
-                                tf.enabled = False
+                                # Safely initialize _active attribute without triggering property getter
+                                try:
+                                    if not hasattr(tf, '__dict__') or '_active' not in tf.__dict__:
+                                        object.__setattr__(tf, '_active', False)
+                                    else:
+                                        tf._active = False
+                                    tf.enabled = False
+                                except (AttributeError, KeyError):
+                                    pass
                         destroy(ent)
                     except:
                         pass
@@ -284,6 +299,7 @@ def start_game(connection_sock, player_id, username, selected_color):
             found_any = False
             for child in list(camera.ui.children):
                 try:
+                    should_destroy = False
                     # Check if it's an InputField and properly clean it up
                     if hasattr(child, '__class__') and 'InputField' in str(type(child)):
                         should_destroy = True
@@ -291,12 +307,15 @@ def start_game(connection_sock, player_id, username, selected_color):
                         child.enabled = False
                         if hasattr(child, 'text_field') and child.text_field:
                             tf = child.text_field
-                            if not hasattr(tf, '_active'):
-                                tf._active = False
-                            tf.enabled = False
+                            # Safely initialize _active attribute without triggering property getter
+                            try:
+                                # Always use object.__setattr__ to avoid triggering property getter/setter
+                                object.__setattr__(tf, '_active', False)
+                                tf.enabled = False
+                            except (AttributeError, KeyError):
+                                pass
                     else:
                         # Check if it's a server browser UI element
-                        should_destroy = False
                         if hasattr(child, 'text') and child.text:
                             text_lower = child.text.lower()
                             if any(keyword in text_lower for keyword in [
@@ -439,21 +458,56 @@ def on_server_selected(ip, username=None):
 # UPDATE LOOP
 # ----------------------------------------------------
 def create_remote(pid, pdata):
-    # Create a tall cube for remote players (reaches POV height)
-    cube_height = 2.4
-    cube_scale = 1.2
-    cube_width_depth = 0.3 * cube_scale
-    cube_height_scaled = cube_height * cube_scale
+    # Use playermodel module to load the actual player model (GLB file)
+    ent = None
+    try:
+        # Use playermodel.spawn_static_playermodel to load the GLB model
+        # Note: playermodel uses scale=(scale, scale * 5, scale), so with scale=1.2, height = 6.0
+        # Server y position is typically player center, so we need to adjust for model height
+        playermodel_scale = 1.2
+        playermodel_height = playermodel_scale * 5  # Height from scale y component
+        # Position the model so its center is at the player position
+        model_position = Vec3(pdata["x"], pdata["y"], pdata["z"])
+        
+        ent = playermodel.spawn_static_playermodel(
+            position=model_position,
+            scale=playermodel_scale,
+            model_path='assets/john_wick_fortnite.glb'
+        )
+        
+        # Apply color tint to the model
+        if ent:
+            player_color = COLOR_MAP.get(pdata["color"], color.red)
+            if hasattr(ent, 'color'):
+                ent.color = player_color
+            # Adjust position if needed (model center should match player center)
+            ent.position = model_position
+    except Exception as e:
+        print(f"Warning: Could not load playermodel for remote player {pid}: {e}")
+        # Fallback to cube if model loading fails
+        # Server y position is player center, so use it directly
+        cube_height = 2.4 * 1.2
+        cube_width_depth = 0.3 * 1.2
+        
+        ent = Entity(
+            model="cube",
+            scale=(cube_width_depth, cube_height, cube_width_depth),
+            color=COLOR_MAP.get(pdata["color"], color.red),
+            collider="box"
+        )
+        ent.position = Vec3(pdata["x"], pdata["y"], pdata["z"])
     
-    ent = Entity(
-        model="cube",
-        scale=(cube_width_depth, cube_height_scaled, cube_width_depth),
-        color=COLOR_MAP.get(pdata["color"], color.red),
-        collider="box"  # Box collider automatically matches entity scale, so hitbox matches entire cube
-    )
+    if not ent:
+        # Ultimate fallback - create a simple cube
+        cube_height = 2.4 * 1.2
+        ent = Entity(
+            model="cube",
+            scale=(0.3 * 1.2, cube_height, 0.3 * 1.2),
+            color=COLOR_MAP.get(pdata["color"], color.red),
+            collider="box"
+        )
+        ent.position = Vec3(pdata["x"], pdata["y"], pdata["z"])
     
-    # Position the cube so it sits on the ground (adjust y by half height)
-    ent.position = Vec3(pdata["x"], pdata["y"] + cube_height_scaled / 2, pdata["z"])
     # Store player_id on entity for damage identification
     ent.player_id = pid
     # Make remote players damageable
@@ -461,8 +515,18 @@ def create_remote(pid, pdata):
     # Initialize health from server data
     ent.health = pdata.get("health", 100)
     ent.max_health = pdata.get("max_health", 100)
+    
+    # Calculate label position based on entity height
+    # Try to get the height from the entity's scale
+    if hasattr(ent, 'scale') and len(ent.scale) >= 2:
+        entity_height = ent.scale[1]
+    else:
+        entity_height = 2.4 * 1.2  # Default height
+    
+    # Position label above the player model (at player y position + half height + offset)
     label = Text(text=pdata.get("name", ""), origin=(0, 0), world_space=True, scale=1)
-    label.position = ent.position + Vec3(0, cube_height_scaled / 2 + 0.2, 0)
+    label.position = Vec3(pdata["x"], pdata["y"] + entity_height / 2 + 0.5, pdata["z"])
+    
     # Disable Text label from raycast detection - it should not block hits
     try:
         if hasattr(label, 'collider'):
@@ -482,19 +546,28 @@ def update_remote_players():
         if pid not in other_players:
             other_players[pid] = create_remote(pid, pdata)
         else:
-            # Update position - adjust y so cube sits on ground
-            cube_height = 2.4 * 1.2  # height * scale
-            other_players[pid]["entity"].position = Vec3(pdata["x"], pdata["y"] + cube_height / 2, pdata["z"])
-            other_players[pid]["label"].position = Vec3(pdata["x"], pdata["y"] + cube_height / 2 + 0.2, pdata["z"])
+            # Update position - server y position is player center, so use it directly
+            ent = other_players[pid]["entity"]
+            ent.position = Vec3(pdata["x"], pdata["y"], pdata["z"])
+            
+            # Calculate label position based on entity height
+            if hasattr(ent, 'scale') and len(ent.scale) >= 2:
+                entity_height = ent.scale[1]
+            else:
+                entity_height = 2.4 * 1.2  # Default height
+            
+            # Position label above the player model
+            other_players[pid]["label"].position = Vec3(pdata["x"], pdata["y"] + entity_height / 2 + 0.5, pdata["z"])
             other_players[pid]["label"].text = pdata.get("name", "")
+            
             # Update health from server
-            if hasattr(other_players[pid]["entity"], "health"):
-                other_players[pid]["entity"].health = pdata.get("health", 100)
-                other_players[pid]["entity"].max_health = pdata.get("max_health", 100)
+            if hasattr(ent, "health"):
+                ent.health = pdata.get("health", 100)
+                ent.max_health = pdata.get("max_health", 100)
             
             # Show/hide entity based on health (dead players disappear)
             is_dead = pdata.get("health", 100) <= 0
-            other_players[pid]["entity"].enabled = not is_dead
+            ent.enabled = not is_dead
             other_players[pid]["label"].enabled = not is_dead
     for pid in list(other_players.keys()):
         if pid not in server_players:
