@@ -1,583 +1,75 @@
-import warnings
-warnings.filterwarnings("ignore", message="iCCP: known incorrect sRGB profile")
-
-from panda3d.core import loadPrcFileData
-loadPrcFileData('', 'notify-level-display error')
-
 from ursina import *
 from ursina.prefabs.first_person_controller import FirstPersonController
-import socket, json, threading, time, random
-import os
-import tempfile
+import socket, json, threading, time
 
-import pause_menu
-import map_loader
-import gun
-from enemy import Enemy
-import health_bar
-import respawn
-import leaderboard
-import player as player_mod
-import playermodel
+app = Ursina()
+window.borderless = False
 
-from server_browser import open_server_browser, get_current_browser
+ip = input("Server IP: ")
+sock = socket.socket()
+sock.connect((ip, 5555))
 
-# --- GLOBALS ---
-sock = None
-USERNAME = ""
-my_id = None
-game_started = False
-server_map_path = None  # Path to map file received from server
+player = FirstPersonController()
+player.cursor.visible = False
+player.speed = 6
 
-server_players = {}
-last_position_send = 0
-position_send_interval = 0.05  # Send position every 50ms (20 times per second instead of 60+)
+others = {}
+scores = {}
 
-COLOR_MAP = {
-    "red": color.red, "orange": color.orange, "yellow": color.yellow,
-    "green": color.green, "cyan": color.cyan, "blue": color.azure,
-    "violet": color.violet, "pink": color.pink
-}
+leaderboard = Text(
+    origin=(.5,.5),
+    position=(.85,.45),
+    scale=1.2
+)
 
-player = None
-other_players = {}
-enemies = []  # List of enemy entities
-
-
-# ----------------------------------------------------
-# NETWORK LISTENER
-# ----------------------------------------------------
-def listen_thread():
-    global server_players
+def network():
     while True:
-        try:
-            data = sock.recv(8192)
-            if not data:
-                break
-            msg = json.loads(data.decode())
-            if msg.get("type") == "players":
-                server_players = msg.get("players", {})
-                # Update leaderboard with player data
-                leaderboard.update_leaderboard_data(server_players)
-        except:
-            time.sleep(0.05)
+        data = sock.recv(8192)
+        if not data:
+            break
+        state = json.loads(data.decode())
 
+        for pid, p in state.items():
+            scores[pid] = p["score"]
 
-# ----------------------------------------------------
-# RECEIVE MAP FROM SERVER
-# ----------------------------------------------------
-def receive_map_from_server(sock, initial_buffer: bytes = b""):
-    """Receive map file from server and save it temporarily (raw binary with caching)."""
-    global server_map_path
-    try:
-        # First message: map_info JSON (môže byť nalepený na ďalšie dáta)
-        if initial_buffer:
-            data = initial_buffer
-        else:
-            data = sock.recv(4096)
+            if pid not in others:
+                others[pid] = Entity(
+                    model='cube',
+                    color=color.red,
+                    scale=(.6,1.8,.6)
+                )
 
-        raw = data.decode()
-        end_idx = raw.find("}")
-        if end_idx == -1:
-            info_msg = json.loads(raw)
-        else:
-            info_part = raw[: end_idx + 1]
-            info_msg = json.loads(info_part)
-
-        if info_msg.get("type") != "map_info":
-            print("Unexpected message type from server (expected map_info)")
-            return None
-
-        filename = info_msg.get("filename")
-        data_size = info_msg.get("size", 0)
-
-        if not filename or data_size == 0:
-            print("No map file available from server")
-            return None
-
-        temp_dir = os.path.join(tempfile.gettempdir(), "gtamini_maps")
-        os.makedirs(temp_dir, exist_ok=True)
-        cached_path = os.path.join(temp_dir, filename)
-
-        # If we already have the file with the same size, reuse it and ask server to skip
-        if os.path.exists(cached_path) and os.path.getsize(cached_path) == data_size:
-            print(f"Using cached map file at {cached_path}, skipping download.")
-            try:
-                sock.sendall(b"SKIP")
-            except Exception:
-                pass
-            server_map_path = cached_path
-            return server_map_path
-
-        print(f"Receiving map file: {filename} ({data_size} bytes)...")
-
-        # Tell server we are ready to receive raw bytes
-        sock.sendall(b"OK")
-
-        # Receive raw binary data and write directly to file
-        bytes_remaining = data_size
-        server_map_path = cached_path
-        with open(server_map_path, "wb") as f:
-            while bytes_remaining > 0:
-                chunk_size = min(8192, bytes_remaining)
-                try:
-                    chunk = sock.recv(chunk_size)
-                except socket.timeout:
-                    print("Timed out while receiving map data from server")
-                    return None
-
-                if not chunk:
-                    print("Connection closed before full map was received.")
-                    return None
-
-                f.write(chunk)
-                bytes_remaining -= len(chunk)
-
-        print(f"Map file saved to: {server_map_path}")
-        return server_map_path
-
-    except Exception as e:
-        print(f"Error receiving map from server: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-
-# ----------------------------------------------------
-# CONNECT TO SERVER (used by server browser)
-# ----------------------------------------------------
-def connect_to_server(ip, username=None):
-    global USERNAME, server_map_path
-    if username and username.strip():
-        USERNAME = username.strip()
-    else:
-        USERNAME = f"Player{random.randint(1000,9999)}"
-    picked_color = random.choice(list(COLOR_MAP.keys()))
-
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(5)
-        s.connect((ip, 9999))
-
-        # First message: player id JSON, ale môže byť nalepený na map_info
-        data = s.recv(4096)
-        raw = data.decode()
-
-        leftover_bytes = b""
-        try:
-            pid = json.loads(raw)["id"]
-        except json.JSONDecodeError:
-            end_idx = raw.find("}")
-            if end_idx == -1:
-                raise
-            first_obj = raw[: end_idx + 1]
-            rest = raw[end_idx + 1 :]
-            pid = json.loads(first_obj)["id"]
-            leftover_bytes = rest.encode() if rest else b""
-
-        # Receive map file from server (príp. so zvyškom z prvého recv)
-        server_map_path = receive_map_from_server(s, initial_buffer=leftover_bytes)
-
-        # Send init info
-        init = {"name": USERNAME, "color": picked_color}
-        s.sendall(json.dumps(init).encode())
-
-        return s, pid, USERNAME, picked_color
-    except Exception as e:
-        print("Failed connection:", e)
-        import traceback
-        traceback.print_exc()
-        return None, None, None, None
-
-
-# ----------------------------------------------------
-# GAME START
-# ----------------------------------------------------
-def start_game(connection_sock, player_id, username, selected_color):
-    global sock, my_id, USERNAME, game_started, player
-
-    sock = connection_sock
-    my_id = player_id
-    USERNAME = username
-    game_started = True
-
-    # First, ensure all InputFields are disabled and fixed to prevent TextField crashes
-    try:
-        from ursina import scene
-        # Fix all InputFields in the scene before starting game
-        if hasattr(scene, 'entities'):
-            for ent in list(scene.entities):
-                try:
-                    if hasattr(ent, '__class__') and 'InputField' in str(type(ent)):
-                        ent.enabled = False
-                        if hasattr(ent, 'text_field') and ent.text_field:
-                            tf = ent.text_field
-                            if not hasattr(tf, '_active'):
-                                tf._active = False
-                            tf.enabled = False
-                except:
-                    pass
-    except:
-        pass
-
-    # Ensure server browser is completely hidden/destroyed
-    browser = get_current_browser()
-    if browser:
-        try:
-            # First, properly clean up InputField objects to prevent TextField crashes
-            if hasattr(browser, 'name_input') and browser.name_input:
-                try:
-                    # Disable and fix TextField before destroying
-                    browser.name_input.enabled = False
-                    if hasattr(browser.name_input, 'text_field') and browser.name_input.text_field:
-                        tf = browser.name_input.text_field
-                        if not hasattr(tf, '_active'):
-                            tf._active = False
-                        tf.enabled = False
-                    # Remove from scene before destroying
-                    if hasattr(browser.name_input, 'remove_node'):
-                        browser.name_input.remove_node()
-                except Exception as e:
-                    print(f"Error cleaning up InputField: {e}")
-            
-            # Clean up all UI elements first
-            if hasattr(browser, '_cleanup_ui'):
-                browser._cleanup_ui()
-            if hasattr(browser, '_ui_elems'):
-                for ent in list(browser._ui_elems):
-                    try:
-                        # Properly disable InputFields before destroying
-                        if hasattr(ent, '__class__') and 'InputField' in str(type(ent)):
-                            ent.enabled = False
-                            if hasattr(ent, 'text_field') and ent.text_field:
-                                tf = ent.text_field
-                                if not hasattr(tf, '_active'):
-                                    tf._active = False
-                                tf.enabled = False
-                        destroy(ent)
-                    except:
-                        pass
-            if hasattr(browser, 'buttons'):
-                for btn in list(browser.buttons):
-                    try:
-                        destroy(btn)
-                    except:
-                        pass
-            # Destroy all children
-            if hasattr(browser, 'children'):
-                for child in list(browser.children):
-                    try:
-                        destroy(child)
-                    except:
-                        pass
-            # Finally destroy the browser entity itself
-            destroy(browser)
-        except Exception as e:
-            print(f"Error cleaning up server browser: {e}")
-    
-    # Also clean up any remaining server browser UI elements from camera.ui
-    # This is a thorough cleanup in case anything was missed
-    try:
-        cleanup_attempts = 0
-        max_attempts = 3
-        while cleanup_attempts < max_attempts:
-            found_any = False
-            for child in list(camera.ui.children):
-                try:
-                    # Check if it's an InputField and properly clean it up
-                    if hasattr(child, '__class__') and 'InputField' in str(type(child)):
-                        should_destroy = True
-                        # Fix TextField before destroying
-                        child.enabled = False
-                        if hasattr(child, 'text_field') and child.text_field:
-                            tf = child.text_field
-                            if not hasattr(tf, '_active'):
-                                tf._active = False
-                            tf.enabled = False
-                    else:
-                        # Check if it's a server browser UI element
-                        should_destroy = False
-                        if hasattr(child, 'text') and child.text:
-                            text_lower = child.text.lower()
-                            if any(keyword in text_lower for keyword in [
-                                "košice online servery", "searching for lan servers",
-                                "server nenájdený", "kliknite server", "hľadám servery",
-                                "zadaj meno", "refresh"
-                            ]):
-                                should_destroy = True
-                            elif ":" in child.text and len(child.text.split(":")) == 2:
-                                # Likely a server IP:PORT button
-                                parts = child.text.replace(":", " ").split()
-                                if len(parts) == 2 and all(p.replace(".", "").isdigit() for p in parts):
-                                    should_destroy = True
-                        
-                        # Also check if it's a Panel with dark background (server browser background)
-                        if hasattr(child, 'model') and hasattr(child, 'color'):
-                            if child.model == 'quad' and hasattr(child.color, 'a') and child.color.a > 0.5:
-                                # Could be server browser background panel
-                                if hasattr(child, 'scale') and child.scale_x > 10 and child.scale_y > 8:
-                                    should_destroy = True
-                    
-                    if should_destroy:
-                        destroy(child)
-                        found_any = True
-                except:
-                    pass
-            
-            if not found_any:
-                break
-            cleanup_attempts += 1
-            
-            # Small delay between cleanup attempts
-            from ursina import invoke
-            invoke(lambda: None, delay=0.01)
-    except Exception as e:
-        print(f"Error in secondary server browser cleanup: {e}")
-
-    threading.Thread(target=listen_thread, daemon=True).start()
-
-    # Zvyšok je pôvodný setup scény a hráča
-    # Lighting & sky (bez tieňov kvôli výkonu)
-    DirectionalLight(y=10, rotation=(45, -45, 0), shadows=False)
-    AmbientLight(color=color.rgba(100, 100, 100, 0.5))
-    Sky()
-
-    # Load map using map_loader (use server's map if available, otherwise use default shooting_game_environment_map_tdm.glb)
-    try:
-        # Use server's map if available, otherwise use default
-        map_path = server_map_path if server_map_path and os.path.exists(server_map_path) else None
-        forest_map = map_loader.load_map(map_path)
-        if forest_map is None:
-            print("WARNING: Map failed to load, continuing without map...")
-    except Exception as e:
-        print(f"ERROR: Failed to load map: {e}")
-        import traceback
-        traceback.print_exc()
-        print("Continuing without map...")
-
-    # Pause menu UI
-    pause_menu.setup_pause_menu()
-
-    # Leaderboard UI (fullscreen, shown when TAB is held)
-    leaderboard.setup_leaderboard(my_id)
-
-    # Player – spawn in the middle of the floor block
-    # Floor top is at y=0, spawn player slightly above ground at center
-    # Ensure mouse is locked before creating player controller
-    mouse.locked = True
-    mouse.visible = False
-    player = player_mod.setup_local_player(
-        position=Vec3(0, 10, 0),  # Spawn higher to avoid getting stuck in geometry (y=10)
-        normal_speed=5,
-        sprint_speed=10,
-        jump_height=2,
-    )
-    # Ensure player controller is enabled and properly initialized
-    if hasattr(player, 'enabled'):
-        player.enabled = True
-    # Ensure speed is set correctly
-    if hasattr(player, 'speed'):
-        player.speed = player.normal_speed
-    # Set player reference for respawn system
-    respawn.set_player(player)
-
-    # Health bar
-    health_bar.setup_health_bar(player)
-
-    # Gun
-    gun.setup_gun(player)
-
-    # Enemies - dočasne vypnuté
-    global enemies
-    enemies = []
-    # base_pos = Vec3(3, 0, 10)
-    # for i in range(5):
-    #     enemy = Enemy(position=base_pos + Vec3(i * 2, 0, 0), scale=(1, 2, 1))
-    #     enemies.append(enemy)
-
-    # Spawn static playermodel on the floor block (taller than before)
-    # Store it globally so we can reference it
-    global static_test_player
-    base_pos = Vec3(5, 0, 5)  # Position on top of floor block (y=0 is top of block)
-    # Spawn white cube with 100 health - it will be destroyed after 5 shots (20 damage each)
-    static_test_player = player_mod.spawn_static_playermodel(position=base_pos, scale=2.0, max_health=100)
-
-
-# ----------------------------------------------------
-# SERVER BROWSER CALLBACK
-# ----------------------------------------------------
-def on_server_selected(ip, username=None):
-    """Called when player clicks a server."""
-
-    # Žiadny loading screen – len log do konzoly
-    print(f"Connecting to server {ip}...")
-
-    def _connect():
-        try:
-            # Use the username parameter from outer scope
-            player_username = username
-            s, pid, player_username, color = connect_to_server(ip, player_username)
-            if s:
-                # Run start_game on the main thread
-                from ursina import invoke
-                invoke(lambda: start_game(s, pid, player_username, color))
+            if p["alive"]:
+                others[pid].enabled = True
+                others[pid].position = lerp(
+                    others[pid].position,
+                    Vec3(*p["pos"]),
+                    time.dt * 10
+                )
             else:
-                print("Connection failed.")
-                from ursina import invoke
-                invoke(lambda: open_server_browser(on_server_selected))
-        except Exception as e:
-            print(f"Unexpected error in _connect: {e}")
-            import traceback
-            traceback.print_exc()
-            from ursina import invoke
-            invoke(lambda: open_server_browser(on_server_selected))
+                others[pid].enabled = False
 
-    threading.Thread(target=_connect, daemon=True).start()
-
-
-# ----------------------------------------------------
-# UPDATE LOOP
-# ----------------------------------------------------
-def create_remote(pid, pdata):
-    # Create a tall cube for remote players (reaches POV height)
-    cube_height = 2.4
-    cube_scale = 1.2
-    cube_width_depth = 0.3 * cube_scale
-    cube_height_scaled = cube_height * cube_scale
-    
-    ent = Entity(
-        model="cube",
-        scale=(cube_width_depth, cube_height_scaled, cube_width_depth),
-        color=COLOR_MAP.get(pdata["color"], color.red),
-        collider="box"  # Box collider automatically matches entity scale, so hitbox matches entire cube
-    )
-    
-    # Position the cube so it sits on the ground (adjust y by half height)
-    ent.position = Vec3(pdata["x"], pdata["y"] + cube_height_scaled / 2, pdata["z"])
-    # Store player_id on entity for damage identification
-    ent.player_id = pid
-    # Make remote players damageable
-    player_mod._attach_health(ent)
-    # Initialize health from server data
-    ent.health = pdata.get("health", 100)
-    ent.max_health = pdata.get("max_health", 100)
-    label = Text(text=pdata.get("name", ""), origin=(0, 0), world_space=True, scale=1)
-    label.position = ent.position + Vec3(0, cube_height_scaled / 2 + 0.2, 0)
-    # Disable Text label from raycast detection - it should not block hits
-    try:
-        if hasattr(label, 'collider'):
-            label.collider = None
-        if hasattr(label, 'nodePath') and label.nodePath:
-            label.nodePath.setCollideMask(0)
-    except:
-        pass
-    
-    return {"entity": ent, "label": label}
-
-
-def update_remote_players():
-    for pid, pdata in server_players.items():
-        if pid == my_id:
-            continue
-        if pid not in other_players:
-            other_players[pid] = create_remote(pid, pdata)
-        else:
-            # Update position - adjust y so cube sits on ground
-            cube_height = 2.4 * 1.2  # height * scale
-            other_players[pid]["entity"].position = Vec3(pdata["x"], pdata["y"] + cube_height / 2, pdata["z"])
-            other_players[pid]["label"].position = Vec3(pdata["x"], pdata["y"] + cube_height / 2 + 0.2, pdata["z"])
-            other_players[pid]["label"].text = pdata.get("name", "")
-            # Update health from server
-            if hasattr(other_players[pid]["entity"], "health"):
-                other_players[pid]["entity"].health = pdata.get("health", 100)
-                other_players[pid]["entity"].max_health = pdata.get("max_health", 100)
-            
-            # Show/hide entity based on health (dead players disappear)
-            is_dead = pdata.get("health", 100) <= 0
-            other_players[pid]["entity"].enabled = not is_dead
-            other_players[pid]["label"].enabled = not is_dead
-    for pid in list(other_players.keys()):
-        if pid not in server_players:
-            destroy(other_players[pid]["entity"])
-            other_players[pid]["label"].enabled = False
-            del other_players[pid]
-
-
-def send_position():
-    global last_position_send
-    if player is None or sock is None:
-        return
-    # Throttle position updates to reduce network traffic
-    current_time = time.time()
-    if current_time - last_position_send < position_send_interval:
-        return
-    last_position_send = current_time
-    pos = {"type": "position", "x": player.x, "y": player.y, "z": player.z}
-    try:
-        sock.sendall(json.dumps(pos).encode())
-    except:
-        pass
-
+threading.Thread(target=network, daemon=True).start()
 
 def update():
-    if not game_started or player is None:
-        return
-    if not pause_menu.paused:
-        # Ensure mouse is locked for FirstPersonController to work
-        if not mouse.locked:
-            mouse.locked = True
-            mouse.visible = False
-        send_position()
-        player_mod.update_local_player(player)
-        
-        # Sync local player health from server (server is authoritative)
-        # Only update if health actually changed to avoid unnecessary updates
-        if my_id and my_id in server_players:
-            server_health = server_players[my_id].get("health", 100)
-            if hasattr(player, "health") and abs(player.health - server_health) > 0.1:
-                player.health = server_health
-            if health_bar.player_health != server_health:
-                health_bar.player_health = server_health
-                health_bar.update_health_bar()
-            
-            # Death/respawn handling based on server health
-            if server_health <= 0 and not respawn.get_is_dead():
-                respawn.die()
-            elif server_health > 0 and respawn.get_is_dead():
-                respawn.respawn()
+    sock.sendall(json.dumps({
+        "type": "update",
+        "pos": list(player.position),
+        "rot": list(player.rotation)
+    }).encode())
 
-        # Enemies sú vypnuté, takže netreba ich updateovať
-        # for enemy in enemies[:]:
-        #     if not enemy or not enemy.enabled:
-        #         if enemy in enemies:
-        #             enemies.remove(enemy)
-        #         continue
-        #     enemy.shoot_at_player(player)
-
-    update_remote_players()
-    gun.update()
-    respawn.update()
-    # Update leaderboard visibility - only show when TAB is held
-    leaderboard.update_visibility()
-    # Only update content when leaderboard is visible (TAB held)
-    if leaderboard.is_visible() and held_keys.get('tab'):
-        leaderboard.update_leaderboard()
-
+    leaderboard.text = "\n".join(
+        [f"{k[-5:]} : {v}" for k,v in scores.items()]
+    )
 
 def input(key):
-    if game_started:
-        pause_menu.handle_pause_input(key, game_started)
-        gun.handle_input(key)
+    if key == 'left mouse down':
+        dir = camera.forward
+        sock.sendall(json.dumps({
+            "type": "shoot",
+            "origin": list(camera.world_position),
+            "dir": [dir.x, dir.y, dir.z]
+        }).encode())
 
-
-# ----------------------------------------------------
-# INIT APP
-# ----------------------------------------------------
-app = Ursina(fullscreen=True)
-
-open_server_browser(on_server_selected)
-
-mouse.locked = False
-mouse.visible = True
-
+Sky()
 app.run()
