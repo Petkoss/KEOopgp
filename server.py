@@ -37,7 +37,7 @@ def respawn(pid):
             players[pid].update({
                 "hp": MAX_HP,
                 "alive": True,
-                "pos": [random.randint(-5,5),1,random.randint(-5,5)]
+                "pos": [random.randint(-15,15),50,random.randint(-15,15)]  # Increased spawn height to match client
             })
 
 def handle_client(conn, addr):
@@ -45,7 +45,7 @@ def handle_client(conn, addr):
 
     with lock:
         players[pid] = {
-            "pos": [0,1,0],
+            "pos": [0,50,0],  # Increased spawn height to match client (map is at -20, so player at 50)
             "rot": [0,0,0],
             "hp": MAX_HP,
             "score": 0,
