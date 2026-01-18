@@ -1,14 +1,18 @@
 from ursina import *
+try:
+    import client
+except ImportError:
+    client = None
+
 from enemy import Enemy
 import player as player_mod
-import gun_effects
 import json
+import time
 
 # ------------------------------
 # GLOBALS
 # ------------------------------
-player = gun = muzzle_flash = None
-bullet_hole_tex = None
+player = gun = None
 rifle_model = None
 
 # Default gun transform
@@ -18,12 +22,8 @@ GUN_SCALE = 1.0
 
 # Shooting state
 shooting = False
-fire_rate = 2  # Slower fire rate (was 0.1)
-ammo = 30
-max_ammo = 30
-reloading = False
-reload_time = 1.5
-recoil_active = False  # Track if recoil is currently active
+fire_rate = 0.1  # Time between shots (in seconds)
+last_shot_time = 0  # Track when last shot was fired
 
 # ------------------------------
 # LOAD RIFLE MODEL
@@ -47,7 +47,7 @@ def setup_gun(player_entity, pos=None, rot=None, scale=None):
     Attach the gun to the camera.
     Optional pos, rot, scale override defaults.
     """
-    global player, gun, muzzle_flash, bullet_hole_tex, GUN_POS, GUN_ROT, GUN_SCALE
+    global player, gun, GUN_POS, GUN_ROT, GUN_SCALE
     player = player_entity
 
     if pos: GUN_POS = Vec3(pos)
@@ -70,118 +70,32 @@ def setup_gun(player_entity, pos=None, rot=None, scale=None):
         always_on_top=True,  # keep visible even when close to geometry
     )
 
-    # Muzzle flash - positioned at the end of the gun barrel
-    # For rifle model, position it forward along the gun's local Z axis
-    muzzle_flash = Entity(
-        parent=gun,
-        model='quad',
-        color=color.yellow,
-        scale=0.3 * GUN_SCALE,
-        position=(0, 0, 0.6),  # Forward along gun barrel
-        rotation_x=90,
-        enabled=False,
-        render_queue=2,
-        always_on_top=True,
-    )
-    
-    # Initialize gun effects system
-    gun_effects.setup_gun_effects(gun, muzzle_flash, GUN_POS, GUN_ROT, GUN_SCALE)
-
-    # Bullet hole texture
-    global bullet_hole_tex
-    for path in ('assets/bullet_hole.png', 'bullet_hole', 'white_cube'):
-        try:
-            bullet_hole_tex = load_texture(path)
-            break
-        except:
-            pass
-    
-    # Crosshair (optional - try to import, but continue if not available)
-    try:
-        import crosshair
-        crosshair.setup_crosshair()
-    except (ImportError, AttributeError):
-        # Crosshair module not available - create a simple crosshair inline
-        try:
-            crosshair_entity = Entity(parent=camera.ui)
-            crosshair_entity.model = None
-            crosshair_entity.visible = False
-            # Horizontal line (left)
-            Entity(parent=crosshair_entity, model='quad', color=color.white, scale=(0.02, 0.002), position=(-0.015, 0, 0))
-            # Horizontal line (right)
-            Entity(parent=crosshair_entity, model='quad', color=color.white, scale=(0.02, 0.002), position=(0.015, 0, 0))
-            # Vertical line (top)
-            Entity(parent=crosshair_entity, model='quad', color=color.white, scale=(0.002, 0.02), position=(0, 0.015, 0))
-            # Vertical line (bottom)
-            Entity(parent=crosshair_entity, model='quad', color=color.white, scale=(0.002, 0.02), position=(0, -0.015, 0))
-        except:
-            pass  # Skip crosshair if it fails
-
-# ------------------------------
-# TRANSFORM UPDATES (delegated to gun_effects)
-# ------------------------------
-def set_gun_transform(pos=None, rot=None, scale=None):
-    """Update gun transform using gun_effects module."""
-    gun_effects.set_gun_transform(pos, rot, scale)
-
-# ------------------------------
-# RECOIL & MUZZLE (delegated to gun_effects)
-# ------------------------------
-def do_recoil():
-    """Apply recoil effect using gun_effects module."""
-    gun_effects.do_recoil(player)
-
-def do_muzzle_flash():
-    """Create muzzle flash effect using gun_effects module."""
-    gun_effects.do_muzzle_flash()
-
-# ------------------------------
-# BULLET HOLE
-# ------------------------------
-def create_bullet_hole(hit_info):
-    if not hit_info.hit:
-        return
-    hole = Entity(
-        model='quad',
-        texture=bullet_hole_tex,
-        scale=0.1,
-        position=hit_info.world_point + hit_info.world_normal * 0.01,
-        billboard=False
-    )
-    hole.look_at(hit_info.world_point + hit_info.world_normal)
-    return hole
-
 # ------------------------------
 # SHOOTING
 # ------------------------------
 def shoot():
-    global ammo
-    if reloading or ammo <= 0 or not shooting or not mouse.left or not player:
+    # Check if we can shoot
+    if not shooting:
+        return
+    if not player:
         return
     
-    ammo -= 1
-    do_recoil()
-    do_muzzle_flash()
+    # Build ignore list - only ignore what we absolutely must
+    ignore = []
     
-    # Build ignore list - include player, gun, playermodel, floor block, and remote player labels
-    ignore = [player, gun] if gun else [player]
+    # Always ignore local player
+    if player:
+        ignore.append(player)
+    
+    # Ignore gun
+    if gun:
+        ignore.append(gun)
+    
+    # Ignore player model (first person model attached to controller)
     if player and hasattr(player, 'playermodel') and player.playermodel:
-        if player.playermodel not in ignore:
-            ignore.append(player.playermodel)
+        ignore.append(player.playermodel)
     
-    # Add remote player labels to ignore list - we want to hit entities, not text labels
-    try:
-        import client
-        if hasattr(client, 'other_players'):
-            for pid, player_data in client.other_players.items():
-                if isinstance(player_data, dict) and 'label' in player_data:
-                    label = player_data['label']
-                    if label and label not in ignore:
-                        ignore.append(label)
-    except:
-        pass
-    
-    # Add all Text entities (labels) to ignore list as backup
+    # Ignore all Text entities (labels) - we want to hit the actual entities, not labels
     try:
         from ursina import scene
         for ent in scene.entities:
@@ -191,93 +105,61 @@ def shoot():
     except:
         pass
     
-    # Add floor block to ignore list so we can shoot through it to hit other entities
-    try:
-        from ursina import scene
-        for ent in scene.entities:
-            if hasattr(ent, 'model') and ent.model == 'cube' and hasattr(ent, 'scale'):
-                # Check if it's the floor block (large flat cube) - NOT player targets
-                if (ent.scale[1] == 1 and ent.scale[0] > 50 and ent.scale[2] > 50 and 
-                    not getattr(ent, 'is_player_target', False)):
-                    if ent not in ignore:
-                        ignore.append(ent)
-                    break
-    except:
-        pass
-    
-    hit_info = raycast(camera.world_position, camera.forward, distance=100, ignore=ignore)
+    # Perform raycast from camera position
+    hit_info = raycast(camera.world_position, camera.forward, distance=200, ignore=ignore)
     
     if hit_info.hit:
         target = hit_info.entity
         damage_amount = 20
         
+        # For GLB models, the raycast might hit a child mesh instead of the parent entity
+        # Walk up the parent chain to find the actual player entity with player_id
+        original_target = target
+        checked_entities = []
+        while target is not None and target not in checked_entities:
+            checked_entities.append(target)
+            # Check if this entity is a player target
+            if getattr(target, 'is_player_target', False) or hasattr(target, 'player_id'):
+                break
+            # Try to find parent
+            if hasattr(target, 'parent') and target.parent:
+                target = target.parent
+            else:
+                break
+        
+        # If we didn't find a player entity in the parent chain, use the original hit entity
+        if not getattr(target, 'is_player_target', False) and not hasattr(target, 'player_id'):
+            target = original_target
+        
+        # Check if target is a player target (marked with is_player_target flag)
+        is_player_target = getattr(target, 'is_player_target', False)
+        has_player_id = hasattr(target, 'player_id')
+        
         if isinstance(target, Enemy):
+            # Enemy entity - use enemy's damage method
             target.take_damage(damage_amount)
-        elif hasattr(target, "player_id"):
-            # Player-vs-player hit - send damage to server for authoritative handling
-            previous_health = getattr(target, "health", 100)
-            if not hasattr(target, "health"):
-                player_mod._attach_health(target, max_health=100)
-                previous_health = getattr(target, "health", 100)
-
-            target_pid = str(target.player_id)
-
-            # Identify attacker (get from client module)
-            attacker_pid = None
-            try:
-                import client
-                attacker_pid = str(client.my_id) if client.my_id else None
-            except Exception:
-                pass
+        elif is_player_target or has_player_id:
+            # Player entity (remote or local static player model)
+            # Apply damage directly on client side - no server communication
             
-            # Send damage message to server if we have valid IDs
-            if attacker_pid and target_pid and attacker_pid != target_pid:
-                try:
-                    import client
-                    if client.sock:
-                        damage_msg = {
-                            "type": "damage",
-                            "target_id": target_pid,
-                            "amount": damage_amount
-                        }
-                        client.sock.sendall(json.dumps(damage_msg).encode())
-                except Exception as e:
-                    print(f"Failed to send damage to server: {e}")
-            
-            # Apply damage locally for immediate feedback (server will sync authoritative health)
-            target.health = max(0, previous_health - damage_amount)
-        else:
-            # Local target (static cubes, etc.) - apply damage directly
-            # Ensure it's a player target and has health
-            if not getattr(target, 'is_player_target', False):
-                target.is_player_target = True
+            # Ensure target has health attributes
             if not hasattr(target, 'health'):
                 player_mod._attach_health(target, max_health=100)
             
-            # Apply damage
+            # Get player ID for debug output
+            target_pid = getattr(target, 'player_id', None)
+            if target_pid:
+                target_pid = str(target_pid)
+            
+            # Apply damage directly to player entity (client-side only)
             player_mod.apply_player_damage(target, damage_amount)
-        create_bullet_hole(hit_info)
 
 def shooting_loop():
-    if shooting and mouse.left and not reloading:
-        shoot()
-        invoke(shooting_loop, delay=fire_rate)
+    """This function is called once when mouse button is pressed, but actual shooting is handled in update()"""
+    # Just ensure shooting flag is set - actual shooting happens in update() loop
+    pass
 
-def reload():
-    global ammo, reloading
-    if reloading or ammo == max_ammo:
-        return
-    
-    reloading = True
-    if gun:
-        reload_offset = Vec3(0, -0.4 * GUN_SCALE, 0)
-        gun.animate_position(GUN_POS + reload_offset, duration=0.2)
-        gun.animate_position(GUN_POS + reload_offset, duration=reload_time-0.4, delay=0.2)
-        gun.animate_position(GUN_POS, duration=0.2, delay=reload_time-0.2)
-        # Update gun effects position after reload animation
-        invoke(gun_effects.update_gun_position, GUN_POS, delay=reload_time)
-    
-    invoke(lambda: (globals().update({'ammo': max_ammo, 'reloading': False})), delay=reload_time)
+# Reload function removed - no ammo system
 
 # ------------------------------
 # HOVER DAMAGE (for debug enemies)
@@ -304,19 +186,26 @@ def hover_damage():
 # INPUT HANDLING
 # ------------------------------
 def handle_input(key):
-    global shooting
+    global shooting, last_shot_time
     if key == 'left mouse down':
         shooting = True
-        shooting_loop()
+        # Reset last shot time so first shot happens immediately
+        last_shot_time = 0
     elif key == 'left mouse up':
         shooting = False
-    elif key == 'r':
-        reload()
 
 # ------------------------------
 # UPDATE LOOP
 # ------------------------------
 def update():
-    # Removed hover_damage() - it was doing expensive raycasts every frame
-    # Damage is now handled properly through the shoot() function
-    pass
+    """Handle continuous shooting in update loop to avoid recursive invoke issues"""
+    global last_shot_time
+    
+    if not shooting or not player:
+        return
+    
+    # Check if enough time has passed since last shot
+    current_time = time.time()
+    if current_time - last_shot_time >= fire_rate:
+        shoot()
+        last_shot_time = current_time

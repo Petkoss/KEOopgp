@@ -3,8 +3,10 @@ from ursina.prefabs.first_person_controller import FirstPersonController
 import playermodel
 
 DEFAULT_HEIGHT = 2.4
-DEFAULT_Y_OFFSET = 1.2
+DEFAULT_Y_OFFSET = 1.8  # Increased from 1.2 to lift camera POV higher
 DEFAULT_HEALTH = 100
+DEFAULT_WIDTH = 0.8  # Increased from 0.3 for larger hitbox
+DEFAULT_DEPTH = 0.8  # Increased from 0.3 for larger hitbox
 
 
 def _attach_health(entity, max_health=DEFAULT_HEALTH, on_death=None):
@@ -52,10 +54,10 @@ def create_player(position=Vec3(0, 3, -2), speed=1, jump_height=1.5):
         position=position,
         collider="box",
     )
-    # Set scale to match cube dimensions: width/depth 0.3, height 2.4
-    controller.scale_x = 0.3
+    # Set scale to match cube dimensions: larger width/depth for easier hits, height 2.4
+    controller.scale_x = DEFAULT_WIDTH  # 0.8 (increased from 0.3)
     controller.scale_y = DEFAULT_HEIGHT  # 2.4
-    controller.scale_z = 0.3
+    controller.scale_z = DEFAULT_DEPTH  # 0.8 (increased from 0.3)
     
     # Ensure collider is properly set up and enabled for physics
     if controller.collider is None:
@@ -65,8 +67,8 @@ def create_player(position=Vec3(0, 3, -2), speed=1, jump_height=1.5):
     try:
         if hasattr(controller.collider, 'enabled'):
             controller.collider.enabled = True
-        # The collider will automatically match the entity's scale (0.3 x 2.4 x 0.3)
-        # This ensures the hitbox matches the entire cube
+        # The collider will automatically match the entity's scale (0.8 x 2.4 x 0.8)
+        # This ensures the hitbox matches the entire cube - larger for easier hits
     except Exception as e:
         print(f"Warning: Could not fully configure player collider: {e}")
     
@@ -94,6 +96,22 @@ def create_player(position=Vec3(0, 3, -2), speed=1, jump_height=1.5):
     controller.base_rot_x = 0
     controller.is_jumping = False
     controller.is_grounded = True
+    
+    # Lift camera POV higher by adjusting camera_pivot if it exists
+    try:
+        if hasattr(controller, 'camera_pivot'):
+            # FirstPersonController has camera_pivot which controls camera position
+            if hasattr(controller.camera_pivot, 'y'):
+                controller.camera_pivot.y = DEFAULT_Y_OFFSET
+            elif hasattr(controller.camera_pivot, 'position'):
+                controller.camera_pivot.position = Vec3(
+                    controller.camera_pivot.position.x,
+                    DEFAULT_Y_OFFSET,
+                    controller.camera_pivot.position.z
+                )
+    except Exception as e:
+        print(f"Warning: Could not adjust camera_pivot height: {e}")
+    
     return controller
 
 

@@ -377,9 +377,7 @@ def start_game(connection_sock, player_id, username, selected_color):
                 break
             cleanup_attempts += 1
             
-            # Small delay between cleanup attempts
-            from ursina import invoke
-            invoke(lambda: None, delay=0.01)
+            # No delay needed - cleanup loop will naturally exit when no entities found
     except Exception as e:
         print(f"Error in secondary server browser cleanup: {e}")
 
@@ -512,12 +510,31 @@ def create_remote(pid, pdata):
                 ent.color = player_color
             # Adjust position if needed (model center should match player center)
             ent.position = model_position
+            
+            # Ensure collider is properly set up for raycast detection
+            if not ent.collider:
+                ent.collider = "box"
+            
+            # Ensure collider is enabled for raycast
+            try:
+                if hasattr(ent, 'collider') and ent.collider:
+                    if hasattr(ent.collider, 'enabled'):
+                        ent.collider.enabled = True
+            except:
+                pass
+            
+            # Increase collider size for easier hits - override scale if needed for hitbox
+            if hasattr(ent, 'scale'):
+                # Make width/depth larger (0.8 instead of model default)
+                ent.scale_x = max(ent.scale_x, 0.8)
+                ent.scale_z = max(ent.scale_z, 0.8)
     except Exception as e:
         print(f"Warning: Could not load playermodel for remote player {pid}: {e}")
         # Fallback to cube if model loading fails
         # Server y position is player center, so use it directly
-        cube_height = 2.4 * 1.2
-        cube_width_depth = 0.3 * 1.2
+        # Use larger dimensions for easier hits
+        cube_height = 2.4
+        cube_width_depth = 0.8  # Increased from 0.3 for larger hitbox
         
         ent = Entity(
             model="cube",
@@ -526,25 +543,51 @@ def create_remote(pid, pdata):
             collider="box"
         )
         ent.position = Vec3(pdata["x"], pdata["y"], pdata["z"])
+        # Mark as player target immediately
+        ent.is_player_target = True
+        print(f"[CREATE_REMOTE] Created fallback cube for player {pid} at {ent.position}")
     
     if not ent:
-        # Ultimate fallback - create a simple cube
-        cube_height = 2.4 * 1.2
+        # Ultimate fallback - create a simple cube with larger hitbox
+        cube_height = 2.4
+        cube_width_depth = 0.8  # Increased from 0.3 for larger hitbox
         ent = Entity(
             model="cube",
-            scale=(0.3 * 1.2, cube_height, 0.3 * 1.2),
+            scale=(cube_width_depth, cube_height, cube_width_depth),
             color=COLOR_MAP.get(pdata["color"], color.red),
             collider="box"
         )
         ent.position = Vec3(pdata["x"], pdata["y"], pdata["z"])
+        # Mark as player target immediately
+        ent.is_player_target = True
+        print(f"[CREATE_REMOTE] Created ultimate fallback cube for player {pid} at {ent.position}")
+    
+    # Ensure entity has a collider for raycast detection (critical for hit detection)
+    if not hasattr(ent, 'collider') or not ent.collider:
+        ent.collider = "box"
+    
+    # Ensure collider is enabled for raycast detection
+    try:
+        if hasattr(ent, 'collider') and ent.collider:
+            if hasattr(ent.collider, 'enabled'):
+                ent.collider.enabled = True
+    except:
+        pass
     
     # Store player_id on entity for damage identification
     ent.player_id = pid
-    # Make remote players damageable
+    
+    # Mark entity as player target so it can be detected by gun system
+    ent.is_player_target = True
+    
+    # Make remote players damageable (client-side health management)
     player_mod._attach_health(ent)
-    # Initialize health from server data
-    ent.health = pdata.get("health", 100)
-    ent.max_health = pdata.get("max_health", 100)
+    # Health is managed purely on client side - start at full health
+    ent.health = 100
+    ent.max_health = 100
+    
+    # Debug: Print entity properties to verify setup
+    print(f"[CREATE_REMOTE] Created player entity {pid}: player_id={ent.player_id}, is_player_target={ent.is_player_target}, has_collider={hasattr(ent, 'collider') and ent.collider is not None}, position={ent.position}")
     
     # Calculate label position based on entity height
     # Try to get the height from the entity's scale
@@ -610,13 +653,15 @@ def update_remote_players():
             other_players[pid]["label"].position = Vec3(pdata["x"], pdata["y"] + entity_height / 2 + 0.5, pdata["z"])
             other_players[pid]["label"].text = pdata.get("name", "")
             
-            # Update health from server
-            if hasattr(ent, "health"):
-                ent.health = pdata.get("health", 100)
-                ent.max_health = pdata.get("max_health", 100)
+            # Client-side health management - don't sync from server
+            # Health is managed purely on client side through damage application
+            # Ensure entity has health attribute if it doesn't exist
+            if not hasattr(ent, "health"):
+                player_mod._attach_health(ent, max_health=100)
             
-            # Show/hide entity based on health (dead players disappear)
-            is_dead = pdata.get("health", 100) <= 0
+            # Show/hide entity based on local client health (dead players disappear)
+            current_health = getattr(ent, "health", 100)
+            is_dead = current_health <= 0
             ent.enabled = not is_dead
             other_players[pid]["label"].enabled = not is_dead
     for pid in list(other_players.keys()):
@@ -663,20 +708,17 @@ def update():
         send_position()
         player_mod.update_local_player(player)
         
-        # Sync local player health from server (server is authoritative)
-        # Only update if health actually changed to avoid unnecessary updates
-        if my_id and my_id in server_players:
-            server_health = server_players[my_id].get("health", 100)
-            if hasattr(player, "health") and abs(player.health - server_health) > 0.1:
-                player.health = server_health
-            if health_bar.player_health != server_health:
-                health_bar.player_health = server_health
+        # Client-side health management (no server syncing)
+        # Update health bar to match local player health
+        if hasattr(player, "health"):
+            if health_bar.player_health != player.health:
+                health_bar.player_health = player.health
                 health_bar.update_health_bar()
             
-            # Death/respawn handling based on server health
-            if server_health <= 0 and not respawn.get_is_dead():
+            # Death/respawn handling based on local client health
+            if player.health <= 0 and not respawn.get_is_dead():
                 respawn.die()
-            elif server_health > 0 and respawn.get_is_dead():
+            elif player.health > 0 and respawn.get_is_dead():
                 respawn.respawn()
 
         # Enemies sú vypnuté, takže netreba ich updateovať

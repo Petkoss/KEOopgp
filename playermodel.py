@@ -238,10 +238,12 @@ def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0, model_path=None)
             model_path = 'assets/john_wick_fortnite.glb'
         
         # Load the GLB model
+        # Use larger scale for width/depth to make hitbox bigger (easier to hit)
+        hitbox_scale = max(scale, 0.8)  # Minimum 0.8 for hitbox width/depth
         ent = Entity(
             model=model_path,
             position=position,
-            scale=(scale, scale * 5, scale),  # 5x taller than default
+            scale=(hitbox_scale, scale * 5, hitbox_scale),  # Larger width/depth for hitbox
             collider="box",  # Box collider for hit detection
             visible=True,  # Ensure it's visible
             enabled=True,  # Ensure it's enabled
@@ -252,6 +254,9 @@ def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0, model_path=None)
             try:
                 if hasattr(ent.collider, 'enabled'):
                     ent.collider.enabled = True
+                # Force collider to match entity scale for accurate hit detection
+                if hasattr(ent.collider, 'size'):
+                    ent.collider.size = (hitbox_scale, scale * 5, hitbox_scale)
             except:
                 pass
         
@@ -267,10 +272,12 @@ def spawn_static_playermodel(position=Vec3(3, 0, 6), scale=1.0, model_path=None)
         try:
             cube_height = 2.4 * scale
             adjusted_position = Vec3(position.x, position.y + cube_height / 2, position.z)
+            # Use larger hitbox dimensions for easier hits
+            hitbox_width = max(0.8, 0.3 * scale)  # Minimum 0.8 width/depth
             ent = Entity(
                 model='cube',
                 position=adjusted_position,
-                scale=(0.3 * scale, cube_height, 0.3 * scale),
+                scale=(hitbox_width, cube_height, hitbox_width),
                 collider="box",
                 color=color.white,  # White cube for visibility
             )
