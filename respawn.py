@@ -5,7 +5,7 @@ import health_bar
 # Respawn state
 is_dead = False
 respawn_timer = 0
-respawn_delay = 10.0
+respawn_delay = 5.0  # 5 seconds respawn delay
 player = None
 
 def set_player(player_entity):

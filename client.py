@@ -621,7 +621,21 @@ def update_remote_players():
         else:
             # Update position - server y position is player center, so use it directly
             ent = other_players[pid]["entity"]
-            ent.position = Vec3(pdata["x"], pdata["y"], pdata["z"])
+            label = other_players[pid].get("label")
+            
+            # Check if entity still exists and is valid before updating position
+            if not ent or not hasattr(ent, 'nodePath') or not ent.nodePath or ent.nodePath.isEmpty():
+                # Entity was destroyed, recreate it
+                other_players[pid] = create_remote(pid, pdata)
+                continue
+            
+            try:
+                ent.position = Vec3(pdata["x"], pdata["y"], pdata["z"])
+            except (AssertionError, AttributeError) as e:
+                # Entity was destroyed, recreate it
+                print(f"Entity for player {pid} was destroyed, recreating: {e}")
+                other_players[pid] = create_remote(pid, pdata)
+                continue
             
             # Update rotation (yaw angle for horizontal rotation)
             rotation_y = pdata.get("rotation_y", 0)
@@ -649,9 +663,13 @@ def update_remote_players():
             else:
                 entity_height = 2.4 * 1.2  # Default height
             
-            # Position label above the player model
-            other_players[pid]["label"].position = Vec3(pdata["x"], pdata["y"] + entity_height / 2 + 0.5, pdata["z"])
-            other_players[pid]["label"].text = pdata.get("name", "")
+            # Position label above the player model - check if label is still valid
+            if label and hasattr(label, 'nodePath') and label.nodePath and not label.nodePath.isEmpty():
+                try:
+                    label.position = Vec3(pdata["x"], pdata["y"] + entity_height / 2 + 0.5, pdata["z"])
+                    label.text = pdata.get("name", "")
+                except (AssertionError, AttributeError):
+                    pass
             
             # Client-side health management - don't sync from server
             # Health is managed purely on client side through damage application
@@ -708,17 +726,19 @@ def update():
         send_position()
         player_mod.update_local_player(player)
         
-        # Client-side health management (no server syncing)
-        # Update health bar to match local player health
-        if hasattr(player, "health"):
-            if health_bar.player_health != player.health:
-                health_bar.player_health = player.health
+        # Sync local player health from server (server is authoritative)
+        if my_id and my_id in server_players:
+            server_health = server_players[my_id].get("health", 100)
+            if hasattr(player, "health") and abs(player.health - server_health) > 0.1:
+                player.health = server_health
+            if health_bar.player_health != server_health:
+                health_bar.player_health = server_health
                 health_bar.update_health_bar()
             
-            # Death/respawn handling based on local client health
-            if player.health <= 0 and not respawn.get_is_dead():
+            # Death/respawn handling based on server health
+            if server_health <= 0 and not respawn.get_is_dead():
                 respawn.die()
-            elif player.health > 0 and respawn.get_is_dead():
+            elif server_health > 0 and respawn.get_is_dead():
                 respawn.respawn()
 
         # Enemies sú vypnuté, takže netreba ich updateovať

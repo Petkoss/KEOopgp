@@ -209,8 +209,8 @@ def handle_client(conn, addr):
                             # Award kill to attacker if target dies
                             if health[target_id] <= 0 and target_id in health:
                                 killtrack.award_kill(attacker_id, target_id)
-                                # Mark for respawn after delay
-                                respawn_timers[target_id] = time.time() + 10.0
+                                # Mark for respawn after 5 seconds delay
+                                respawn_timers[target_id] = time.time() + 5.0
                                 # Keep health at 0 until respawn; optionally reset position
                                 if target_id in players:
                                     players[target_id].update({"x": 0, "y": 0, "z": 0})

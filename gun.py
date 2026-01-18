@@ -1,8 +1,4 @@
 from ursina import *
-try:
-    import client
-except ImportError:
-    client = None
 
 from enemy import Enemy
 import player as player_mod
@@ -24,6 +20,10 @@ GUN_SCALE = 1.0
 shooting = False
 fire_rate = 0.1  # Time between shots (in seconds)
 last_shot_time = 0  # Track when last shot was fired
+
+# Damage message throttling - prevent spam to server
+last_damage_time = {}  # target_id -> last time damage was sent
+damage_cooldown = 0.1  # Minimum time between damage messages to same target (seconds)
 
 # ------------------------------
 # LOAD RIFLE MODEL
@@ -96,9 +96,13 @@ def shoot():
         ignore.append(player.playermodel)
     
     # Ignore all Text entities (labels) - we want to hit the actual entities, not labels
+    # Cache this to avoid scanning every frame - update only when needed
     try:
         from ursina import scene
-        for ent in scene.entities:
+        # Only scan Text entities if scene is small or cache is invalid
+        # For performance, limit to first 100 entities to avoid lag
+        entities_list = list(scene.entities)[:100] if hasattr(scene, 'entities') else []
+        for ent in entities_list:
             if isinstance(ent, Text):
                 if ent not in ignore:
                     ignore.append(ent)
@@ -139,20 +143,35 @@ def shoot():
             # Enemy entity - use enemy's damage method
             target.take_damage(damage_amount)
         elif is_player_target or has_player_id:
-            # Player entity (remote or local static player model)
-            # Apply damage directly on client side - no server communication
-            
-            # Ensure target has health attributes
-            if not hasattr(target, 'health'):
-                player_mod._attach_health(target, max_health=100)
-            
-            # Get player ID for debug output
+            # Player entity (remote player) - send damage to server
             target_pid = getattr(target, 'player_id', None)
             if target_pid:
                 target_pid = str(target_pid)
-            
-            # Apply damage directly to player entity (client-side only)
-            player_mod.apply_player_damage(target, damage_amount)
+                # Throttle damage messages to prevent spam
+                current_time = time.time()
+                last_time = last_damage_time.get(target_pid, 0)
+                
+                if current_time - last_time >= damage_cooldown:
+                    # Send damage to server for authoritative handling
+                    try:
+                        import client
+                        if client.sock and client.my_id:
+                            damage_msg = {
+                                "type": "damage",
+                                "target_id": target_pid,
+                                "amount": damage_amount
+                            }
+                            client.sock.sendall(json.dumps(damage_msg).encode())
+                            last_damage_time[target_pid] = current_time
+                            # Only print occasionally to reduce console spam
+                            # print(f"💥 Hit player {target_pid} for {damage_amount} damage")
+                    except Exception as e:
+                        print(f"Error sending damage to server: {e}")
+            else:
+                # Local static player model or test target - apply damage directly
+                if not hasattr(target, 'health'):
+                    player_mod._attach_health(target, max_health=100)
+                player_mod.apply_player_damage(target, damage_amount)
 
 def shooting_loop():
     """This function is called once when mouse button is pressed, but actual shooting is handled in update()"""

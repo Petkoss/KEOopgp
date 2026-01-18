@@ -170,6 +170,24 @@ class ServerBrowser(Entity):
         # Fix: Initialize _active attribute on TextField to prevent AttributeError
         fix_inputfield_textfield(self.name_input)
         
+        # Add click handler to activate input field when clicked
+        def activate_on_click():
+            try:
+                if hasattr(self.name_input, 'text_field') and self.name_input.text_field:
+                    tf = self.name_input.text_field
+                    if not hasattr(tf, '_active'):
+                        tf._active = False
+                    self.name_input.active = True
+                    if hasattr(tf, 'active'):
+                        tf.active = True
+                    if hasattr(self.name_input, 'focus'):
+                        self.name_input.focus()
+            except:
+                pass
+        
+        # Make the input field clickable to activate it
+        self.name_input.on_click = activate_on_click
+        
         # Set hover color to keep it bright
         self.name_input.hover_color = color.rgb(255, 255, 255)
         
@@ -189,6 +207,32 @@ class ServerBrowser(Entity):
         set_text_color()
         invoke(set_text_color, delay=0.1)
         invoke(set_text_color, delay=0.3)
+        
+        # Activate InputField to allow typing - try with delays to ensure it works
+        def activate_input():
+            try:
+                if hasattr(self.name_input, 'text_field') and self.name_input.text_field:
+                    tf = self.name_input.text_field
+                    # Ensure _active attribute exists
+                    if not hasattr(tf, '_active'):
+                        tf._active = False
+                    # Activate the text field for input
+                    self.name_input.active = True
+                    if hasattr(tf, 'active'):
+                        tf.active = True
+                    # Focus the input field
+                    if hasattr(self.name_input, 'focus'):
+                        self.name_input.focus()
+                    # Also try clicking on it to activate
+                    if hasattr(self.name_input, 'on_click'):
+                        self.name_input.on_click()
+            except Exception as e:
+                # Silently fail - user can click to activate
+                pass
+        
+        # Try to activate after a short delay to ensure everything is initialized
+        invoke(activate_input, delay=0.2)
+        invoke(activate_input, delay=0.5)
         
         # Add a visible border around the input field
         try:
