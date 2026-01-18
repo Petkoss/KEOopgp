@@ -161,7 +161,7 @@ def handle_client(conn, addr):
                 color = requested_color
             else:
                 color = COLOR_POOL[int(player_id) % len(COLOR_POOL)]
-            players[player_id] = {"x":0,"y":0,"z":0,"name":name,"color":color}
+            players[player_id] = {"x":0,"y":0,"z":0,"rotation_y":0,"name":name,"color":color}
             health[player_id] = MAX_HEALTH  # Initialize health
             killtrack.initialize_player(player_id)  # Initialize kill tracking
 
@@ -181,7 +181,8 @@ def handle_client(conn, addr):
                         players[player_id].update({
                             "x": float(d.get("x", players[player_id]["x"])),
                             "y": float(d.get("y", players[player_id]["y"])),
-                            "z": float(d.get("z", players[player_id]["z"]))
+                            "z": float(d.get("z", players[player_id]["z"])),
+                            "rotation_y": float(d.get("rotation_y", players[player_id].get("rotation_y", 0)))
                         })
                     # Throttle position broadcasts - only broadcast if enough time has passed
                     current_time = time.time()
@@ -249,7 +250,7 @@ def periodic_broadcast_loop():
                         health[pid] = MAX_HEALTH
                         # Reset position to spawn (0,0,0); clients add offsets as needed
                         if pid in players:
-                            players[pid].update({"x": 0, "y": 0, "z": 0})
+                            players[pid].update({"x": 0, "y": 0, "z": 0, "rotation_y": 0})
                         del respawn_timers[pid]
                         respawned = True
             

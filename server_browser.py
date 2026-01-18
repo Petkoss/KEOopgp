@@ -4,6 +4,36 @@ import socket, threading, json, random
 PORT = 9999
 SCAN_TIMEOUT = 0.25
 
+# ----------------------------
+# PATCH TEXTFIELD TO FIX _active ATTRIBUTE ERROR
+# ----------------------------
+def patch_textfield_class():
+    """
+    Monkey-patch TextField class to ensure _active attribute always exists.
+    This prevents AttributeError when Ursina tries to access _active before it's initialized.
+    """
+    try:
+        from ursina.prefabs.text_field import TextField
+        original_active_getter = TextField.active.fget if hasattr(TextField.active, 'fget') else None
+        
+        def safe_active_getter(self):
+            """Safe getter for active property that initializes _active if needed."""
+            if not hasattr(self, '__dict__') or '_active' not in self.__dict__:
+                object.__setattr__(self, '_active', False)
+            return self.__dict__.get('_active', False)
+        
+        def safe_active_setter(self, value):
+            """Safe setter for active property."""
+            object.__setattr__(self, '_active', bool(value))
+        
+        # Replace the property with our safe version
+        TextField.active = property(safe_active_getter, safe_active_setter)
+    except Exception as e:
+        # Silently fail if patching doesn't work
+        pass
+
+# Apply patch when module loads
+patch_textfield_class()
 
 def fix_inputfield_textfield(input_field):
     """

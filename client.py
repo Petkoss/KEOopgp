@@ -9,6 +9,36 @@ from ursina.prefabs.first_person_controller import FirstPersonController
 import socket, json, threading, time, random
 import os
 import tempfile
+
+# ----------------------------
+# PATCH TEXTFIELD TO FIX _active ATTRIBUTE ERROR
+# ----------------------------
+def patch_textfield_class():
+    """
+    Monkey-patch TextField class to ensure _active attribute always exists.
+    This prevents AttributeError when Ursina tries to access _active before it's initialized.
+    """
+    try:
+        from ursina.prefabs.text_field import TextField
+        def safe_active_getter(self):
+            """Safe getter for active property that initializes _active if needed."""
+            if not hasattr(self, '__dict__') or '_active' not in self.__dict__:
+                object.__setattr__(self, '_active', False)
+            return self.__dict__.get('_active', False)
+        
+        def safe_active_setter(self, value):
+            """Safe setter for active property."""
+            object.__setattr__(self, '_active', bool(value))
+        
+        # Replace the property with our safe version
+        TextField.active = property(safe_active_getter, safe_active_setter)
+    except Exception:
+        # Silently fail if patching doesn't work
+        pass
+
+# Apply patch early, before any TextField objects are created
+patch_textfield_class()
+
 import pause_menu
 import map_loader
 import gun
@@ -550,6 +580,26 @@ def update_remote_players():
             ent = other_players[pid]["entity"]
             ent.position = Vec3(pdata["x"], pdata["y"], pdata["z"])
             
+            # Update rotation (yaw angle for horizontal rotation)
+            rotation_y = pdata.get("rotation_y", 0)
+            try:
+                # Ursina entities use rotation as Vec3 (x, y, z)
+                # rotation_y is the horizontal rotation (yaw)
+                # Keep existing x and z rotation, only update y (horizontal)
+                current_rot = getattr(ent, 'rotation', Vec3(0, 0, 0))
+                if isinstance(current_rot, (tuple, list)) and len(current_rot) >= 3:
+                    ent.rotation = Vec3(current_rot[0], rotation_y, current_rot[2])
+                elif hasattr(current_rot, 'x') and hasattr(current_rot, 'z'):
+                    ent.rotation = Vec3(current_rot.x, rotation_y, current_rot.z)
+                else:
+                    ent.rotation = Vec3(0, rotation_y, 0)
+            except Exception:
+                # Fallback: try setting rotation_y directly if entity supports it
+                try:
+                    ent.rotation_y = rotation_y
+                except:
+                    pass
+            
             # Calculate label position based on entity height
             if hasattr(ent, 'scale') and len(ent.scale) >= 2:
                 entity_height = ent.scale[1]
@@ -585,7 +635,17 @@ def send_position():
     if current_time - last_position_send < position_send_interval:
         return
     last_position_send = current_time
-    pos = {"type": "position", "x": player.x, "y": player.y, "z": player.z}
+    
+    # Get rotation from camera (yaw angle for horizontal rotation)
+    rotation_y = camera.rotation_y if hasattr(camera, 'rotation_y') else 0
+    
+    pos = {
+        "type": "position",
+        "x": player.x,
+        "y": player.y,
+        "z": player.z,
+        "rotation_y": rotation_y
+    }
     try:
         sock.sendall(json.dumps(pos).encode())
     except:

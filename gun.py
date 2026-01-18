@@ -96,8 +96,26 @@ def setup_gun(player_entity, pos=None, rot=None, scale=None):
         except:
             pass
     
-    # Crosshair
-    crosshair.setup_crosshair()
+    # Crosshair (optional - try to import, but continue if not available)
+    try:
+        import crosshair
+        crosshair.setup_crosshair()
+    except (ImportError, AttributeError):
+        # Crosshair module not available - create a simple crosshair inline
+        try:
+            crosshair_entity = Entity(parent=camera.ui)
+            crosshair_entity.model = None
+            crosshair_entity.visible = False
+            # Horizontal line (left)
+            Entity(parent=crosshair_entity, model='quad', color=color.white, scale=(0.02, 0.002), position=(-0.015, 0, 0))
+            # Horizontal line (right)
+            Entity(parent=crosshair_entity, model='quad', color=color.white, scale=(0.02, 0.002), position=(0.015, 0, 0))
+            # Vertical line (top)
+            Entity(parent=crosshair_entity, model='quad', color=color.white, scale=(0.002, 0.02), position=(0, 0.015, 0))
+            # Vertical line (bottom)
+            Entity(parent=crosshair_entity, model='quad', color=color.white, scale=(0.002, 0.02), position=(0, -0.015, 0))
+        except:
+            pass  # Skip crosshair if it fails
 
 # ------------------------------
 # TRANSFORM UPDATES (delegated to gun_effects)
