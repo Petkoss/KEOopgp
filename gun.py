@@ -156,12 +156,12 @@ def shoot():
                     try:
                         import client
                         if client.sock and client.my_id:
-                            damage_msg = {
-                                "type": "damage",
-                                "target_id": target_pid,
-                                "amount": damage_amount
-                            }
-                            client.sock.sendall(json.dumps(damage_msg).encode() + b"\n")
+                            damage_msg = {"type": "damage", "target_id": target_pid, "amount": damage_amount}
+                            # Never block render thread on network I/O
+                            if hasattr(client, "send_to_server"):
+                                client.send_to_server(damage_msg)
+                            else:
+                                client.sock.sendall(json.dumps(damage_msg).encode() + b"\n")
                             last_damage_time[target_pid] = current_time
                             # Only print occasionally to reduce console spam
                             # print(f"💥 Hit player {target_pid} for {damage_amount} damage")

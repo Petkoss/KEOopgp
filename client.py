@@ -9,6 +9,7 @@ from ursina.prefabs.first_person_controller import FirstPersonController
 import socket, json, threading, time, random
 import os
 import tempfile
+import queue
 
 # ----------------------------
 # PATCH TEXTFIELD TO FIX _active ATTRIBUTE ERROR
@@ -72,6 +73,42 @@ player = None
 other_players = {}
 enemies = []  # List of enemy entities
 
+# ----------------------------------------------------
+# NETWORK SENDER (avoid blocking render thread)
+# ----------------------------------------------------
+_outgoing_queue: "queue.Queue[dict]" = queue.Queue(maxsize=256)
+_sender_thread_started = False
+
+def send_to_server(msg: dict) -> None:
+    """
+    Enqueue a JSON message to send to the server.
+    This is safe to call from the render thread (e.g., shooting).
+    If the queue is full, the message is dropped to prevent freezing.
+    """
+    global sock
+    if sock is None:
+        return
+    try:
+        _outgoing_queue.put_nowait(msg)
+    except queue.Full:
+        # Drop instead of blocking the game loop.
+        pass
+
+def _sender_loop():
+    global sock
+    while True:
+        try:
+            msg = _outgoing_queue.get()
+            if msg is None:
+                continue
+            if sock is None:
+                continue
+            payload = (json.dumps(msg).encode() + b"\n")
+            # sendall can block; we keep it off the render thread
+            sock.sendall(payload)
+        except Exception:
+            time.sleep(0.02)
+
 
 # ----------------------------------------------------
 # NETWORK LISTENER
@@ -90,11 +127,11 @@ def listen_thread():
                 if not line.strip():
                     continue
                 msg = json.loads(line.decode())
-            if msg.get("type") == "players":
-                server_players = msg.get("players", {})
-                # Update leaderboard with player data
-                leaderboard.update_leaderboard_data(server_players)
-        except:
+                if msg.get("type") == "players":
+                    server_players = msg.get("players", {})
+                    # Update leaderboard with player data
+                    leaderboard.update_leaderboard_data(server_players)
+        except Exception:
             time.sleep(0.05)
 
 
@@ -235,6 +272,17 @@ def start_game(connection_sock, player_id, username, selected_color):
     my_id = player_id
     USERNAME = username
     game_started = True
+
+    # After handshake/map transfer, avoid ever blocking the render thread on socket ops
+    try:
+        sock.settimeout(0.2)
+    except Exception:
+        pass
+
+    global _sender_thread_started
+    if not _sender_thread_started:
+        threading.Thread(target=_sender_loop, daemon=True).start()
+        _sender_thread_started = True
 
     # First, ensure all InputFields are disabled and fixed to prevent TextField crashes
     try:
@@ -735,7 +783,7 @@ def send_position():
         "rotation_y": rotation_y
     }
     try:
-        sock.sendall(json.dumps(pos).encode() + b"\n")
+        send_to_server(pos)
     except:
         pass
 
