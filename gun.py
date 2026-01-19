@@ -8,13 +8,13 @@ import time
 # ------------------------------
 # GLOBALS
 # ------------------------------
-player = gun = None
-rifle_model = None
+player = None
+gun = None
 
-# Default gun transform
-GUN_POS = Vec3(0.75, -0.8, 1)
-GUN_ROT = Vec3(270, 90, 184)
-GUN_SCALE = 1.0
+# Default gun transform (used as base position/rotation for the scene.gltf model)
+GUN_POS = Vec3(0.5, -0.5, 1)
+GUN_ROT = Vec3(0, 0, 0)
+GUN_SCALE = 0.5
 
 # Shooting state
 shooting = False
@@ -24,20 +24,6 @@ last_shot_time = 0  # Track when last shot was fired
 # Damage message throttling - prevent spam to server
 last_damage_time = {}  # target_id -> last time damage was sent
 damage_cooldown = 0.1  # Minimum time between damage messages to same target (seconds)
-
-# ------------------------------
-# LOAD RIFLE MODEL
-# ------------------------------
-def _try_load_rifle():
-    global rifle_model
-    for path in ('assets/rifle.glb', 'rifle.glb', 'rifle'):
-        try:
-            rifle_model = load_model(path)
-            return
-        except:
-            pass
-
-_try_load_rifle()
 
 # ------------------------------
 # SETUP GUN
@@ -54,21 +40,31 @@ def setup_gun(player_entity, pos=None, rot=None, scale=None):
     if rot: GUN_ROT = Vec3(rot)
     if scale: GUN_SCALE = scale
 
-    # Gun entity
-    gun_color = color.gray if not rifle_model else color.white
-
+    # Gun entity - use the scene.gltf model directly so it keeps its own textures/materials
     gun = Entity(
         parent=camera,
-        model=rifle_model or 'cube',
-        color=gun_color,
-        scale=(0.3, 0.2, 1) if not rifle_model else GUN_SCALE,
+        model='assets/scene.gltf',
         position=GUN_POS,
         rotation=GUN_ROT,
+        scale=GUN_SCALE,
+        color=None,           # None -> use model's own materials/textures
         collider=None,
         double_sided=True,
-        render_queue=1,      # draw after world to avoid clipping into walls
-        always_on_top=True,  # keep visible even when close to geometry
+        render_queue=1,       # draw after world to avoid clipping into walls
+        always_on_top=True,   # keep visible even when close to geometry
     )
+
+
+# ------------------------------
+# GUN SWAY
+# ------------------------------
+def sway():
+    """Simple gun sway based on mouse velocity."""
+    if not gun:
+        return
+    # Base position (.5, -.5) plus a small offset from mouse movement
+    gun.x = 0.5 + mouse.velocity[0] * 2
+    gun.y = -0.5 + mouse.velocity[1] * 2
 
 # ------------------------------
 # SHOOTING
@@ -217,12 +213,15 @@ def handle_input(key):
 # UPDATE LOOP
 # ------------------------------
 def update():
-    """Handle continuous shooting in update loop to avoid recursive invoke issues"""
+    """Handle gun sway and continuous shooting in update loop."""
     global last_shot_time
-    
+
+    # Always apply sway so the gun feels responsive even when not shooting
+    sway()
+
     if not shooting or not player:
         return
-    
+
     # Check if enough time has passed since last shot
     current_time = time.time()
     if current_time - last_shot_time >= fire_rate:

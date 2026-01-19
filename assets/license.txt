@@ -1,0 +1,8 @@
+Model Information:
+* title:	SCAR Heavy Mk17
+* source:	https://sketchfab.com/3d-models/scar-heavy-mk17-04b9582eaafe4747ba7d854acf269326
+* author:	Mateusz Woliński (https://sketchfab.com/jeandiz)
+
+Model License:
+* license type:	SKETCHFAB Standard (https://sketchfab.com/licenses)
+* requirements:	Under basic restrictions, use worldwide, on all types of media, commercially or not, and in all types of derivative works
