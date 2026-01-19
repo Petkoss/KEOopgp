@@ -486,6 +486,16 @@ def on_server_selected(ip, username=None):
 # UPDATE LOOP
 # ----------------------------------------------------
 def create_remote(pid, pdata):
+    """Create remote player entity for given pid if it doesn't already exist.
+    If it exists, just return the existing one to avoid spawning duplicates.
+    """
+    # Normalize pid to string to keep keys consistent with JSON player ids
+    pid = str(pid)
+
+    # If we already have an entity for this pid, reuse it instead of creating a new one
+    if pid in other_players and other_players[pid].get("entity"):
+        return other_players[pid]
+
     # Use playermodel module to load the actual player model (GLB file)
     ent = None
     try:
@@ -609,11 +619,15 @@ def create_remote(pid, pdata):
     except:
         pass
     
-    return {"entity": ent, "label": label}
+    # Store and return the remote player record
+    other_players[pid] = {"entity": ent, "label": label}
+    return other_players[pid]
 
 
 def update_remote_players():
-    for pid, pdata in server_players.items():
+    # Normalize server player ids to strings to match other_players keys
+    for raw_pid, pdata in server_players.items():
+        pid = str(raw_pid)
         if pid == my_id:
             continue
         if pid not in other_players:
@@ -683,9 +697,15 @@ def update_remote_players():
             ent.enabled = not is_dead
             other_players[pid]["label"].enabled = not is_dead
     for pid in list(other_players.keys()):
-        if pid not in server_players:
-            destroy(other_players[pid]["entity"])
-            other_players[pid]["label"].enabled = False
+        # server_players keys may be non-str; normalize for comparison
+        if str(pid) not in {str(k) for k in server_players.keys()}:
+            try:
+                if other_players[pid].get("entity"):
+                    destroy(other_players[pid]["entity"])
+                if other_players[pid].get("label"):
+                    other_players[pid]["label"].enabled = False
+            except:
+                pass
             del other_players[pid]
 
 
