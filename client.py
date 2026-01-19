@@ -78,12 +78,18 @@ enemies = []  # List of enemy entities
 # ----------------------------------------------------
 def listen_thread():
     global server_players
+    recv_buf = b""
     while True:
         try:
             data = sock.recv(8192)
             if not data:
                 break
-            msg = json.loads(data.decode())
+            recv_buf += data
+            while b"\n" in recv_buf:
+                line, recv_buf = recv_buf.split(b"\n", 1)
+                if not line.strip():
+                    continue
+                msg = json.loads(line.decode())
             if msg.get("type") == "players":
                 server_players = msg.get("players", {})
                 # Update leaderboard with player data
@@ -209,7 +215,7 @@ def connect_to_server(ip, username=None):
 
         # Send init info
         init = {"name": USERNAME, "color": picked_color}
-        s.sendall(json.dumps(init).encode())
+        s.sendall(json.dumps(init).encode() + b"\n")
 
         return s, pid, USERNAME, picked_color
     except Exception as e:
@@ -685,20 +691,19 @@ def update_remote_players():
                 except (AssertionError, AttributeError):
                     pass
             
-            # Client-side health management - don't sync from server
-            # Health is managed purely on client side through damage application
-            # Ensure entity has health attribute if it doesn't exist
-            if not hasattr(ent, "health"):
-                player_mod._attach_health(ent, max_health=100)
+            # Sync remote player health from server
+            current_health = pdata.get("health", 100)
+            max_health = pdata.get("max_health", 100)
+            ent.health = current_health
+            ent.max_health = max_health
             
-            # Show/hide entity based on local client health (dead players disappear)
-            current_health = getattr(ent, "health", 100)
+            # Show/hide entity based on server health (dead players disappear until respawn)
             is_dead = current_health <= 0
             ent.enabled = not is_dead
             other_players[pid]["label"].enabled = not is_dead
+    server_ids = {str(k) for k in server_players.keys()}
     for pid in list(other_players.keys()):
-        # server_players keys may be non-str; normalize for comparison
-        if str(pid) not in {str(k) for k in server_players.keys()}:
+        if str(pid) not in server_ids:
             try:
                 if other_players[pid].get("entity"):
                     destroy(other_players[pid]["entity"])
@@ -730,7 +735,7 @@ def send_position():
         "rotation_y": rotation_y
     }
     try:
-        sock.sendall(json.dumps(pos).encode())
+        sock.sendall(json.dumps(pos).encode() + b"\n")
     except:
         pass
 

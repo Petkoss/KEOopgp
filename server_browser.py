@@ -39,16 +39,15 @@ def fix_inputfield_textfield(input_field):
     """
     Fix TextField _active attribute issue that causes AttributeError.
     This is a workaround for Ursina InputField/TextField initialization bug.
+    Only initializes _active if it doesn't exist, doesn't reset it if already active.
     """
     def _fix():
         try:
             if hasattr(input_field, 'text_field') and input_field.text_field:
                 tf = input_field.text_field
-                # Always use object.__setattr__ to avoid triggering property getter/setter
-                try:
+                # Only initialize _active if it doesn't exist (don't reset if already True)
+                if not hasattr(tf, '_active'):
                     object.__setattr__(tf, '_active', False)
-                except (AttributeError, KeyError):
-                    pass
         except (AttributeError, KeyError):
             pass
     
@@ -170,23 +169,31 @@ class ServerBrowser(Entity):
         # Fix: Initialize _active attribute on TextField to prevent AttributeError
         fix_inputfield_textfield(self.name_input)
         
-        # Add click handler to activate input field when clicked
-        def activate_on_click():
+        # CRITICAL: Add click handler to activate input field when clicked
+        def activate_input_on_click():
             try:
+                # Ensure TextField exists
                 if hasattr(self.name_input, 'text_field') and self.name_input.text_field:
                     tf = self.name_input.text_field
+                    # Ensure _active attribute exists
                     if not hasattr(tf, '_active'):
-                        tf._active = False
+                        object.__setattr__(tf, '_active', False)
+                    # Activate both InputField and TextField
                     self.name_input.active = True
-                    if hasattr(tf, 'active'):
-                        tf.active = True
+                    tf.active = True
+                    # Also try to set active directly
+                    object.__setattr__(tf, '_active', True)
+                    # Focus the input
                     if hasattr(self.name_input, 'focus'):
                         self.name_input.focus()
-            except:
-                pass
+                    if hasattr(tf, 'focus'):
+                        tf.focus()
+                    print("InputField activated on click")
+            except Exception as e:
+                print(f"Error activating InputField: {e}")
         
-        # Make the input field clickable to activate it
-        self.name_input.on_click = activate_on_click
+        # Assign click handler
+        self.name_input.on_click = activate_input_on_click
         
         # Set hover color to keep it bright
         self.name_input.hover_color = color.rgb(255, 255, 255)
@@ -208,31 +215,9 @@ class ServerBrowser(Entity):
         invoke(set_text_color, delay=0.1)
         invoke(set_text_color, delay=0.3)
         
-        # Activate InputField to allow typing - try with delays to ensure it works
-        def activate_input():
-            try:
-                if hasattr(self.name_input, 'text_field') and self.name_input.text_field:
-                    tf = self.name_input.text_field
-                    # Ensure _active attribute exists
-                    if not hasattr(tf, '_active'):
-                        tf._active = False
-                    # Activate the text field for input
-                    self.name_input.active = True
-                    if hasattr(tf, 'active'):
-                        tf.active = True
-                    # Focus the input field
-                    if hasattr(self.name_input, 'focus'):
-                        self.name_input.focus()
-                    # Also try clicking on it to activate
-                    if hasattr(self.name_input, 'on_click'):
-                        self.name_input.on_click()
-            except Exception as e:
-                # Silently fail - user can click to activate
-                pass
-        
-        # Try to activate after a short delay to ensure everything is initialized
-        invoke(activate_input, delay=0.2)
-        invoke(activate_input, delay=0.5)
+        # Ensure InputField has collider so it can be clicked
+        if not hasattr(self.name_input, 'collider') or not self.name_input.collider:
+            self.name_input.collider = 'box'
         
         # Add a visible border around the input field
         try:
@@ -265,10 +250,18 @@ class ServerBrowser(Entity):
         threading.Thread(target=self._scan, daemon=True).start()
 
     def update(self):
-        """Update method to fix TextField _active attribute issue."""
+        """Update method to maintain InputField active state."""
         try:
             if hasattr(self, 'name_input') and self.name_input:
-                fix_inputfield_textfield(self.name_input)
+                # Only fix _active if it doesn't exist, but don't reset it if it's already True
+                if hasattr(self.name_input, 'text_field') and self.name_input.text_field:
+                    tf = self.name_input.text_field
+                    # Only initialize _active if it doesn't exist
+                    if not hasattr(tf, '_active'):
+                        object.__setattr__(tf, '_active', False)
+                    # Ensure it stays active if it was activated
+                    if self.name_input.active and not tf.active:
+                        tf.active = True
         except:
             pass
 
@@ -331,8 +324,14 @@ class ServerBrowser(Entity):
         player_name = ""
         try:
             if hasattr(self, "name_input") and self.name_input:
-                player_name = (self.name_input.text or "").strip()
-        except:
+                # Try to get text from text_field first (more reliable)
+                if hasattr(self.name_input, 'text_field') and self.name_input.text_field:
+                    player_name = (getattr(self.name_input.text_field, 'text', '') or "").strip()
+                # Fallback to InputField.text property
+                if not player_name:
+                    player_name = (getattr(self.name_input, 'text', '') or "").strip()
+        except Exception as e:
+            print(f"Error getting player name: {e}")
             player_name = ""
         if not player_name:
             player_name = f"Player{random.randint(1000,9999)}"

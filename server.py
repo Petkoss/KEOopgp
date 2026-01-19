@@ -62,7 +62,7 @@ def broadcast_players():
             "type": "players",
             "players": players_with_data,  # This contains all player data including kills
             "leaderboard": leaderboard
-        }).encode()
+        }).encode() + b"\n"
         
         removed = []
         for pid, info in clients.items():
@@ -145,13 +145,21 @@ def handle_client(conn, addr):
             player_id = str(next_id)
             next_id += 1
             clients[player_id] = {"conn": conn, "addr": addr}
-        conn.sendall(json.dumps({"id": player_id}).encode())
+        # newline-delimited JSON for robustness over TCP
+        conn.sendall(json.dumps({"id": player_id}).encode() + b"\n")
         
         # Send map file to client
         send_map_to_client(conn)
 
-        data = conn.recv(4096)
-        init = json.loads(data.decode())
+        # Read init JSON (newline-delimited)
+        init_buf = b""
+        while b"\n" not in init_buf:
+            chunk = conn.recv(4096)
+            if not chunk:
+                raise ConnectionError("Client disconnected during init")
+            init_buf += chunk
+        init_line, _rest = init_buf.split(b"\n", 1)
+        init = json.loads(init_line.decode())
         name = init.get("name", f"Player{player_id}")
         requested_color = init.get("color", "")
 
@@ -167,11 +175,22 @@ def handle_client(conn, addr):
 
         broadcast_players()
 
+        recv_buf = b""
         while True:
             data = conn.recv(4096)
             if not data:
                 break
-            d = json.loads(data.decode())
+            recv_buf += data
+            # Process all complete JSON lines
+            while b"\n" in recv_buf:
+                line, recv_buf = recv_buf.split(b"\n", 1)
+                if not line.strip():
+                    continue
+                try:
+                    d = json.loads(line.decode())
+                except json.JSONDecodeError:
+                    # Ignore malformed partial lines (should be rare with newline framing)
+                    continue
             
             should_broadcast = False
             with LOCK:
@@ -191,7 +210,7 @@ def handle_client(conn, addr):
                         should_broadcast = True
                 elif d.get("type") == "damage":
                     # Handle damage event
-                    target_id = d.get("target_id")
+                    target_id = str(d.get("target_id")) if d.get("target_id") is not None else None
                     damage_amount = float(d.get("amount", 0))
                     attacker_id = player_id
                     
@@ -203,7 +222,7 @@ def handle_client(conn, addr):
                         if target_id in respawn_timers:
                             pass
                         else:
-                            # Apply damage
+                            # Apply damage (20 HP per hit expected client-side)
                             health[target_id] = max(0, health[target_id] - damage_amount)
                             
                             # Award kill to attacker if target dies
@@ -213,7 +232,7 @@ def handle_client(conn, addr):
                                 respawn_timers[target_id] = time.time() + 5.0
                                 # Keep health at 0 until respawn; optionally reset position
                                 if target_id in players:
-                                    players[target_id].update({"x": 0, "y": 0, "z": 0})
+                                    players[target_id].update({"x": 0, "y": 0, "z": 0, "rotation_y": 0})
                             
                             # Damage events should broadcast immediately
                             should_broadcast = True

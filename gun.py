@@ -161,7 +161,7 @@ def shoot():
                                 "target_id": target_pid,
                                 "amount": damage_amount
                             }
-                            client.sock.sendall(json.dumps(damage_msg).encode())
+                            client.sock.sendall(json.dumps(damage_msg).encode() + b"\n")
                             last_damage_time[target_pid] = current_time
                             # Only print occasionally to reduce console spam
                             # print(f"💥 Hit player {target_pid} for {damage_amount} damage")
@@ -171,7 +171,7 @@ def shoot():
                 # Local static player model or test target - apply damage directly
                 if not hasattr(target, 'health'):
                     player_mod._attach_health(target, max_health=100)
-                player_mod.apply_player_damage(target, damage_amount)
+            player_mod.apply_player_damage(target, damage_amount)
 
 def shooting_loop():
     """This function is called once when mouse button is pressed, but actual shooting is handled in update()"""
